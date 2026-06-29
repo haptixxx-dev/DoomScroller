@@ -120,14 +120,83 @@ Fast-paced 3D FPS. Doom / ULTRAKILL / HyperDemon style. Arena combat, aggressive
 - [x] GitHub Actions CI - Windows + macOS + Linux build matrix
 - [x] clang-format + clang-tidy enforced in CI
 - [x] Catch2 v3.8.0 unit tests (22 assertions, 4 test cases)
+- [x] Vertex buffer + indexed draw (`Vertex{pos,color}`, cube 8v/36i, `uploadImmediate`)
+- [x] GLM wired + `column_major` MVP push constants (SPIRV set=1 binding=0, MSL `[[buffer(1)]]`)
+- [x] FPS camera (`Camera`, `lookAt`+`perspective`, WASD+mouse look, dt-scaled)
+- [x] Depth buffer (D32Float, `clearDepth=1.0`, `CompareOp::Less`, fixed missing compare op)
 
 ### Next (in order)
-- [ ] Vertex buffer + indexed draw (real geometry, not shader-hardcoded)
-- [ ] GLM wired up + push constants for MVP matrix
-- [ ] FPS camera (view/projection, mouse look, WASD)
-- [ ] Depth buffer (required before overlapping 3D geometry)
-- [ ] Texture loading (stb_image + GPU upload + sampler)
-- [ ] First arena blockout (simple box rooms)
-- [ ] ECS integration (EnTT) for game objects
-- [ ] Jolt physics integration
-- [ ] Lua scripting bootstrap
+
+| # | Task | Depends on | Key deliverable |
+|---|------|-----------|-----------------|
+| 1 | **Texture loading** | - | stb_image, GPU upload, sampler, UV in `Vertex` + shader |
+| 2 | **Mesh loading (cgltf)** | 1 | Load `.glb`, generalize geometry pipeline beyond cube |
+| 3 | **ECS (EnTT)** | - | `Transform`, `Mesh`, `Material` components; EnTT world in `Engine` |
+| 4 | **Transform system** | 3 | Position/rotation/scale per entity, model matrix, MVP = proj*view*model |
+| 5 | **Arena level geometry** | 2, 4 | Simple box room from glTF or procedural; first walkable space |
+| 6 | **Basic lighting** | 5 | Normal in `Vertex`, ambient+directional in fragment shader |
+| 7 | **Jolt physics** | 4 | Rigid body world, player capsule, collision vs. level, gravity |
+| 8 | **Player controller** | 7 | Ground-based movement (jump, sprint); replaces fly camera |
+| 9 | **Enemy entity** | 8 | Spawn point, idle/chase/attack state machine, placeholder mesh |
+| 10 | **Weapon + hitscan** | 9 | Ray cast via Jolt, damage component, enemy death; closes game loop |
+
+#### Task 1 - Texture loading
+- Add `glm::vec2 uv` to `Vertex` struct
+- `stb_image` decode + `uploadImmediateTexture` to `RHITexture`
+- `createSampler` (linear, repeat); `TextureManager` or simple cache by path
+- Update `triangle.slang` (or new `mesh.slang`): `Texture2D` + `SamplerState`, sample in frag
+- Update `ShaderLoader`/pipeline: `numSamplers=1` for fragment shader
+- Wire `bindFragmentTexture` in render loop
+
+#### Task 2 - Mesh loading (cgltf)
+- `Mesh` struct: `RHIBuffer vertexBuffer, indexBuffer; uint32_t indexCount; IndexType indexType`
+- `MeshLoader::load(path)` via `cgltf`: parse positions, normals, UVs, indices
+- Support multiple primitives per glTF mesh
+- Generalize `Engine::render` to draw from `Mesh` rather than hardcoded cube buffers
+
+#### Task 3 - ECS (EnTT)
+- Add `entt::registry m_world` to `Engine`
+- Components: `Transform`, `MeshComponent`, `MaterialComponent`
+- System-style free functions: `renderSystem(registry, cmd, camera)`
+- Keep engine-owned resources (device, window) separate from ECS
+
+#### Task 4 - Transform system
+- `Transform`: `glm::vec3 position`, `glm::quat rotation`, `glm::vec3 scale`
+- `modelMatrix()` computed from TRS decomposition
+- MVP push = `proj * view * entity.transform.modelMatrix()`
+- Optional: dirty flag + cached matrix
+
+#### Task 5 - Arena level geometry
+- Hand-authored box room as glTF (or procedural via code)
+- Floor/walls/ceiling as static mesh entities
+- No collision yet - visual walkthrough only
+
+#### Task 6 - Basic lighting
+- Add `glm::vec3 normal` to `Vertex`; update vertex attributes
+- New `mesh.slang` (or extend triangle.slang): Blinn-Phong or Lambertian diffuse
+- `LightConstants` push: `vec3 lightDir`, `vec3 lightColor`, `vec3 ambientColor`
+- Phong requires normals in world space: push `normalMatrix = transpose(inverse(model))`
+
+#### Task 7 - Jolt physics
+- `PhysicsWorld` wrapper: `JPH::PhysicsSystem`, `JPH::BodyInterface`
+- Static mesh body for level (triangle mesh shape)
+- Player capsule: `JPH::CharacterVirtual` or kinematic capsule
+- `PhysicsWorld::step(dt)` called from `Engine::update`
+
+#### Task 8 - Player controller
+- `PlayerController`: wraps Jolt capsule, exposes `move(dir, dt)`, `jump()`
+- Replace fly-camera WASD with ground-projected movement
+- Preserve mouse look in `Camera`; camera follows capsule position + eye offset
+- Ground check, coyote time, variable jump
+
+#### Task 9 - Enemy entity
+- `EnemyComponent`: health, state (idle/chase/attack), target entity
+- `EnemySystem::update(registry, dt, playerPos)`
+- Spawn from a `SpawnPoint` component (position in level)
+- Placeholder mesh (capsule or cube); Jolt dynamic body
+
+#### Task 10 - Weapon + hitscan
+- `WeaponComponent` on player entity: fire rate, damage, ammo
+- Left-click fires: `JPH::RayCastResult` from camera origin along front vector
+- Hit enemy: subtract health via `HealthComponent`; enemy death removes entity
+- Visual feedback: muzzle flash (point light one frame), hit decal (future)
