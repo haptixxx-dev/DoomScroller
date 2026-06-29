@@ -7,6 +7,7 @@ configure_file(
 add_library(engine STATIC
     src/Engine.cpp
     src/Paths.cpp
+    src/ShaderLoader.cpp
     src/rhi/sdl3/SDL3Device.cpp
 )
 

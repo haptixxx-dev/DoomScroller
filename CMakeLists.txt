@@ -80,6 +80,28 @@ endif()
 option(DS_DEV "Enable developer mode" OFF)
 
 # ---------------------------------------------------------------------------
+# Slang shader compiler (prebuilt binary download)
+# ---------------------------------------------------------------------------
+include(cmake/Slang.cmake)
+include(cmake/CompileSlang.cmake)
+
+set(_shader_out "${CMAKE_BINARY_DIR}/shaders")
+if(APPLE)
+    set(_shader_targets spirv metal)
+elseif(WIN32)
+    set(_shader_targets spirv dxil)
+else()
+    set(_shader_targets spirv)
+endif()
+
+ds_compile_slang(
+    SOURCES   ${CMAKE_SOURCE_DIR}/shaders/triangle.slang
+    STAGES    vertex fragment
+    TARGETS   ${_shader_targets}
+    OUT_DIR   "${_shader_out}"
+)
+
+# ---------------------------------------------------------------------------
 # Engine + Game
 # ---------------------------------------------------------------------------
 add_subdirectory(engine)
