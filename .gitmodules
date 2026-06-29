@@ -28,3 +28,6 @@
 [submodule "extern/tracy"]
 	path = extern/tracy
 	url = https://github.com/wolfpld/tracy.git
+[submodule "extern/catch2"]
+	path = extern/catch2
+	url = https://github.com/catchorg/Catch2.git

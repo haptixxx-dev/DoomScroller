@@ -102,7 +102,17 @@ ds_compile_slang(
 )
 
 # ---------------------------------------------------------------------------
-# Engine + Game
+# Catch2 (unit tests)
+# ---------------------------------------------------------------------------
+set(CATCH_INSTALL_DOCS    OFF CACHE BOOL "" FORCE)
+set(CATCH_INSTALL_EXTRAS  OFF CACHE BOOL "" FORCE)
+add_subdirectory(extern/catch2)
+
+# ---------------------------------------------------------------------------
+# Engine + Game + Tests
 # ---------------------------------------------------------------------------
 add_subdirectory(engine)
 add_subdirectory(game)
+
+enable_testing()
+add_subdirectory(tests)

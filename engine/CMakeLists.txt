@@ -4,6 +4,13 @@ configure_file(
     ${CMAKE_CURRENT_BINARY_DIR}/include/engine/BuildConfig.h
 )
 
+# Header-only interface for tests that only need type definitions (no SDL3/mimalloc deps)
+add_library(engine_headers INTERFACE)
+target_include_directories(engine_headers INTERFACE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_BINARY_DIR}/include
+)
+
 add_library(engine STATIC
     src/Engine.cpp
     src/Paths.cpp

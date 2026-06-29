@@ -1,0 +1,120 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  # --------------------------------------------------------------------------
+  # Build + test matrix
+  # --------------------------------------------------------------------------
+  build:
+    name: build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            clang clang-tidy \
+            libwayland-dev libxkbcommon-dev wayland-protocols \
+            libx11-dev libxext-dev libxrandr-dev libxcursor-dev \
+            libxi-dev libxinerama-dev libxxf86vm-dev libxss-dev \
+            libvulkan-dev libpulse-dev libasound2-dev \
+            ninja-build
+
+      - name: Install macOS dependencies
+        if: runner.os == 'macOS'
+        run: brew install ninja
+
+      - name: Set up ccache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: ${{ runner.os }}-cmake
+          max-size: 500M
+
+      - name: Cache Slang prebuilt
+        uses: actions/cache@v4
+        with:
+          path: build/release/_deps
+          key: slang-${{ runner.os }}-2026.12
+
+      - name: Configure
+        run: cmake --preset release -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+
+      - name: Build
+        run: cmake --build --preset release --parallel
+
+      - name: Run tests
+        run: ctest --test-dir build/release --output-on-failure
+
+  # --------------------------------------------------------------------------
+  # clang-format check
+  # --------------------------------------------------------------------------
+  format:
+    name: clang-format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install clang-format
+        run: sudo apt-get update && sudo apt-get install -y clang-format
+
+      - name: Check formatting
+        run: |
+          find engine game tests \
+            \( -name '*.cpp' -o -name '*.h' \) \
+            ! -path '*/extern/*' \
+            | xargs clang-format --dry-run --Werror
+
+  # --------------------------------------------------------------------------
+  # clang-tidy (Linux only - needs compile_commands.json)
+  # --------------------------------------------------------------------------
+  tidy:
+    name: clang-tidy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            clang clang-tidy \
+            libwayland-dev libxkbcommon-dev wayland-protocols \
+            libx11-dev libxext-dev libxrandr-dev libxcursor-dev \
+            libxi-dev libxinerama-dev libxxf86vm-dev libxss-dev \
+            libvulkan-dev libpulse-dev libasound2-dev \
+            ninja-build
+
+      - name: Cache Slang prebuilt
+        uses: actions/cache@v4
+        with:
+          path: build/release/_deps
+          key: slang-Linux-2026.12
+
+      - name: Configure
+        run: cmake --preset release
+
+      - name: Run clang-tidy
+        run: |
+          find engine/include engine/src \
+            \( -name '*.cpp' -o -name '*.h' \) \
+            ! -path '*/rhi/sdl3/*' \
+            | xargs clang-tidy \
+              -p build/release \
+              --warnings-as-errors='*'
