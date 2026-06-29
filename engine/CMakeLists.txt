@@ -8,4 +8,8 @@ target_include_directories(engine
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 
-target_link_libraries(engine PUBLIC SDL3::SDL3-static)
+target_link_libraries(engine PUBLIC SDL3::SDL3-static TracyClient)
+
+if(DS_PROFILE)
+    target_compile_definitions(engine PUBLIC DS_PROFILE)
+endif()

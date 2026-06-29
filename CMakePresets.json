@@ -20,6 +20,17 @@
         "CMAKE_BUILD_TYPE": "RelWithDebInfo",
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
       }
+    },
+    {
+      "name": "profile",
+      "displayName": "Profile (Release + Tracy)",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/profile",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+        "DS_PROFILE": "ON"
+      }
     }
   ],
   "buildPresets": [
@@ -30,6 +41,10 @@
     {
       "name": "release",
       "configurePreset": "release"
+    },
+    {
+      "name": "profile",
+      "configurePreset": "profile"
     }
   ]
 }

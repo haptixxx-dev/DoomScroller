@@ -1,4 +1,5 @@
 #include "engine/Engine.h"
+#include "engine/Profiler.h"
 #include "rhi/sdl3/SDL3Device.h"
 #include <stdexcept>
 
@@ -27,10 +28,12 @@ void Engine::run() {
         processEvents();
         update();
         render();
+        DS_FRAME_MARK();
     }
 }
 
 void Engine::processEvents() {
+    DS_ZONE();
     SDL_Event e;
     while (SDL_PollEvent(&e)) {
         if (e.type == SDL_EVENT_QUIT)
@@ -38,9 +41,12 @@ void Engine::processEvents() {
     }
 }
 
-void Engine::update() {}
+void Engine::update() {
+    DS_ZONE();
+}
 
 void Engine::render() {
+    DS_ZONE();
     rhi::IRHICommandList* cmd = m_device->beginFrame();
     if (!cmd) return;
 

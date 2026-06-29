@@ -63,6 +63,18 @@ add_subdirectory(extern/mimalloc)
 add_subdirectory(extern/lua/lua-5.4.7)
 
 # ---------------------------------------------------------------------------
+# Tracy profiler (opt-in via DS_PROFILE)
+# Embedded directly via public/TracyClient.cpp to avoid CMake preset conflicts
+# ---------------------------------------------------------------------------
+option(DS_PROFILE "Enable Tracy frame profiler" OFF)
+add_library(TracyClient STATIC)
+target_sources(TracyClient PRIVATE extern/tracy/public/TracyClient.cpp)
+target_include_directories(TracyClient PUBLIC extern/tracy/public)
+if(DS_PROFILE)
+    target_compile_definitions(TracyClient PUBLIC TRACY_ENABLE TRACY_ON_DEMAND)
+endif()
+
+# ---------------------------------------------------------------------------
 # Engine + Game
 # ---------------------------------------------------------------------------
 add_subdirectory(engine)

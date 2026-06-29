@@ -25,3 +25,6 @@
 [submodule "extern/lua"]
 	path = extern/lua
 	url = https://github.com/walterschell/Lua.git
+[submodule "extern/tracy"]
+	path = extern/tracy
+	url = https://github.com/wolfpld/tracy.git
