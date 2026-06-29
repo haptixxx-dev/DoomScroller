@@ -24,76 +24,74 @@ Fast-paced 3D FPS. Doom / ULTRAKILL / HyperDemon style. Arena combat, aggressive
 
 ### Rendering Architecture
 - **Abstraction**: Custom RHI interface (`IRHIDevice`, `IRHICommandList`, etc.)
-  - Engine code talks only to RHI interface
-  - SDL3 GPU backend ships first
+  - Engine code talks only to RHI interface, never raw SDL3 GPU / Vulkan / Metal
+  - SDL3 GPU backend ships first (`SDL3Device`, `SDL3CommandList`)
   - Vulkan / Metal backends added later without touching engine code
+  - Native handle escape hatch (`nativeDevice()`) unblocks mesh shaders when needed
 - **Render path (base)**: Forward rendering - lower VRAM pressure, sufficient for doom-style light counts
 - **Render path (enhanced)**: Mesh shader pipeline on capable hardware (Vulkan `VK_EXT_mesh_shader` / DX12 / Metal mesh shaders)
-- **Tier selection**: runtime capability query at startup
+- **Tier selection**: runtime capability query at startup via `RHICaps`
 
-### Libraries (pending submodule addition)
-| Lib | Purpose | Format |
-|-----|---------|--------|
-| GLM | Math (vectors, matrices, quaternions) | header-only submodule |
-| STB | Image loading | header-only submodule |
-| cgltf | glTF 2.0 model loading | header-only submodule |
-| entt | ECS | header-only submodule |
-| Jolt | Physics | submodule |
-| miniaudio | 3D audio | header-only submodule |
-| mimalloc | General allocator | submodule |
-| Lua 5.4 | Scripting / modding | submodule |
+### Submodules
+| Lib | Version | Purpose |
+|-----|---------|---------|
+| SDL3 | release-3.4.10 | Window, input, audio, GPU backend |
+| GLM | 1.0.3 | Math (vectors, matrices, quaternions) |
+| STB | HEAD | Image loading |
+| cgltf | v1.15 | glTF 2.0 model loading |
+| EnTT | v3.16.0 | ECS |
+| JoltPhysics | v5.5.0 | Physics |
+| miniaudio | 0.11.25 | 3D audio |
+| mimalloc | v3.3.2 | General allocator |
+| Lua | v5.4.7 | Scripting / modding |
 
-### Shader Pipeline (tentative)
+### Shader Pipeline
 - **Language**: HLSL
-- **Cross-compilation**: SDL_shadercross (HLSL → SPIRV / MSL / DXIL)
-- Offline compilation preferred; runtime fallback for dev
-
----
-
-## Decided (continued)
+- **Cross-compilation**: SDL_shadercross (HLSL -> SPIRV / MSL / DXIL)
+- **Shipping**: pre-compiled bytecode, no compiler linked
+- **Dev mode** (`DS_DEV`): filesystem watcher on `shaders/*.hlsl`, recompile + hot-swap on change
 
 ### Entity System
-- **entt** (submodule) - ECS, cache-friendly, scales to 10k+ entities
+- **EnTT** - ECS, cache-friendly, scales to 10k+ entities
 
 ### Physics
-- **Jolt** (submodule) - MIT, multithreaded, modern, capable of scaling to complex simulation
+- **Jolt** - MIT, multithreaded, scales to complex simulation
 
 ### Audio
-- **miniaudio** (submodule, header-only) - 3D spatialization, effects, zero deps
-- Future: may migrate to FMOD or expand; keep audio calls behind internal API when scope allows
+- **miniaudio** - 3D spatialization, effects, zero deps
+- Future: may migrate to FMOD; keep calls behind internal audio API when scope allows
 
 ### Memory
-- **Frame arena** - per-frame scratch allocation, O(1) bump, free-all at frame end
-- **Pool allocators** - fixed-size blocks for entities, components
-- **mimalloc** (submodule) - base general allocator replacing new/delete everywhere else
-- No custom allocator replaces mimalloc; arenas/pools sit on top for hot paths
+- **Frame arena** - per-frame scratch, O(1) bump alloc, free-all at frame end
+- **Pool allocators** - fixed-size blocks for entities and components
+- **mimalloc** - base general allocator, replaces new/delete everywhere else
+- Arenas and pools sit on top of mimalloc for hot paths
 
 ### Level Format
-- **Custom binary** - runtime format, fast load, engine-tailored
-- **External converter tool** (separate project) - glTF / other → custom binary, enables modding support
+- **Custom binary** - fast load, engine-tailored runtime format
+- **External converter tool** (separate project) - glTF / other formats to custom binary, enables modding
 
 ### Scripting
-- **Lua 5.4** (submodule) - game logic, modding, internal dev automation
-- Binding layer needed between C++ engine and Lua VM
+- **Lua 5.4** - game logic, modding, internal dev automation
+- Binding layer required between C++ engine and Lua VM
 
 ### Asset Pipeline
-- **Shipping**: offline cook step - source assets → cook tool → engine binary format (BC7 textures, packed geometry)
-- **Dev mode** (`DS_DEV`): runtime load from source (glTF, PNG) - fast iteration, no cook step
-- External converter tool (separate project) handles glTF → binary; doubles as modding entry point
-
-### Shaders
-- **Shipping**: pre-compiled bytecode (SPIRV / MSL / DXIL) - zero startup cost, no compiler linked
-- **Dev mode** (`DS_DEV`): filesystem watcher on `shaders/*.hlsl` → recompile via SDL_shadercross → hot-swap pipeline without restart
-- SDL_shadercross linked only in dev builds
+- **Shipping**: offline cook step - source assets -> cook tool -> engine binary format (BC7 textures, packed geometry)
+- **Dev mode** (`DS_DEV`): runtime load from source (glTF, PNG) for fast iteration
 
 ### Networking
-- Out of scope - singleplayer first.
+- Out of scope - singleplayer first
 
 ---
 
 ## Current State
-- [x] Repo init, SDL3 submodule pinned
-- [x] CMake build working, binary produces
-- [x] Basic SDL3 GPU window + render loop
-- [ ] RHI interface design
-- [ ] First triangle
+- [x] Repo init, all submodules pinned and building
+- [x] CMake build working (457 targets, clean)
+- [x] SDL3 GPU window + clear color render loop
+- [x] RHI interface designed (`RHITypes.h`, `IRHIDevice.h`, `IRHICommandList.h`)
+- [x] SDL3 GPU backend implemented (`SDL3Device`, `SDL3CommandList`)
+- [x] Engine owns `IRHIDevice` - no raw SDL3 GPU calls outside backend
+- [ ] First triangle on screen
+- [ ] FPS camera
+- [ ] Textured mesh
+- [ ] First arena blockout
