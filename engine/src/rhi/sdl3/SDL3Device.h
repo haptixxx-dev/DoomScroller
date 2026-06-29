@@ -81,12 +81,16 @@ class SDL3Device final : public IRHIDevice {
     void submitFrame(IRHICommandList* cmd) override;
 
     void uploadImmediate(RHIBuffer dst, const void* data, uint64_t size, uint64_t dstOffset) override;
-    void uploadImmediateTexture(RHITexture dst, const void* data, uint64_t size, uint32_t mipLevel) override;
+    void uploadImmediateTexture(RHITexture dst, const void* data, uint64_t size,
+                                uint32_t width, uint32_t height, uint32_t mipLevel) override;
 
     const RHICaps& caps() const override { return m_caps; }
     TextureFormat swapchainFormat() const override;
 
     void* nativeDevice() const override { return m_gpu; }
+
+    // Debug: download an RGBA8/BGRA8 render-target texture to a PPM file.
+    void debugDownloadTexture(RHITexture tex, uint32_t w, uint32_t h, const char* path);
 
   private:
     SDL_GPUTextureFormat toSDLFormat(TextureFormat fmt) const;

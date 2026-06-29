@@ -96,6 +96,7 @@ endif()
 
 ds_compile_slang(
     SOURCES   ${CMAKE_SOURCE_DIR}/shaders/triangle.slang
+              ${CMAKE_SOURCE_DIR}/shaders/mesh.slang
     STAGES    vertex fragment
     TARGETS   ${_shader_targets}
     OUT_DIR   "${_shader_out}"

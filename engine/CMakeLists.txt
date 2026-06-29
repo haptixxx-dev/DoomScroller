@@ -10,12 +10,32 @@ target_include_directories(engine_headers INTERFACE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${CMAKE_CURRENT_BINARY_DIR}/include
 )
+target_link_libraries(engine_headers INTERFACE glm::glm EnTT::EnTT)
+
+# Pure-math subset for headless unit tests (Camera, no SDL3/Tracy/Jolt/mimalloc)
+add_library(engine_math STATIC
+    src/Camera.cpp
+)
+target_include_directories(engine_math PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_BINARY_DIR}/include
+)
+target_link_libraries(engine_math PUBLIC glm::glm)
+target_compile_definitions(engine_math PUBLIC GLM_FORCE_DEPTH_ZERO_TO_ONE)
 
 add_library(engine STATIC
     src/Engine.cpp
     src/Camera.cpp
     src/Paths.cpp
     src/ShaderLoader.cpp
+    src/TextureManager.cpp
+    src/MeshLoader.cpp
+    src/PhysicsWorld.cpp
+    src/PlayerController.cpp
+    src/cgltf_impl.cpp
+    src/stb_impl.cpp
+    src/ecs/RenderSystem.cpp
+    src/ecs/EnemySystem.cpp
     src/rhi/sdl3/SDL3Device.cpp
 )
 
@@ -27,7 +47,7 @@ target_include_directories(engine
         ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 
-target_link_libraries(engine PUBLIC SDL3::SDL3-static TracyClient mimalloc-static glm::glm)
+target_link_libraries(engine PUBLIC SDL3::SDL3-static TracyClient mimalloc-static glm::glm EnTT::EnTT stb cgltf Jolt)
 
 target_compile_definitions(engine PUBLIC GLM_FORCE_DEPTH_ZERO_TO_ONE)
 

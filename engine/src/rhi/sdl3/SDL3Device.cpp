@@ -19,8 +19,13 @@ static void sdlCheck(bool ok, const char* msg) {
 // SDL3Device
 // ---------------------------------------------------------------------------
 SDL3Device::SDL3Device(SDL_Window* window) : m_window(window) {
+#if defined(DS_DEV)
+    m_gpu = SDL_CreateGPUDevice(SDL_GPU_SHADERFORMAT_SPIRV | SDL_GPU_SHADERFORMAT_MSL | SDL_GPU_SHADERFORMAT_DXIL,
+                                true, nullptr);  // debug_mode=true catches validation errors
+#else
     m_gpu = SDL_CreateGPUDevice(SDL_GPU_SHADERFORMAT_SPIRV | SDL_GPU_SHADERFORMAT_MSL | SDL_GPU_SHADERFORMAT_DXIL,
                                 false, nullptr);
+#endif
     sdlCheck(m_gpu != nullptr, "SDL_CreateGPUDevice");
     sdlCheck(SDL_ClaimWindowForGPUDevice(m_gpu, m_window), "SDL_ClaimWindowForGPUDevice");
 
@@ -98,11 +103,14 @@ SDL_GPUTextureFormat SDL3Device::toSDLFormat(TextureFormat fmt) const {
 }
 
 RHITexture SDL3Device::createTexture(const TextureDesc& desc) {
-    SDL_GPUTextureUsageFlags usage = SDL_GPU_TEXTUREUSAGE_SAMPLER;
-    if (desc.isRenderTarget)
-        usage |= SDL_GPU_TEXTUREUSAGE_COLOR_TARGET;
-    if (desc.isDepthStencil)
-        usage |= SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET;
+    SDL_GPUTextureUsageFlags usage = 0;
+    if (desc.isDepthStencil) {
+        usage = SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET;
+    } else {
+        usage = SDL_GPU_TEXTUREUSAGE_SAMPLER;
+        if (desc.isRenderTarget)
+            usage |= SDL_GPU_TEXTUREUSAGE_COLOR_TARGET;
+    }
 
     SDL_GPUTextureCreateInfo info{};
     info.type                 = SDL_GPU_TEXTURETYPE_2D;
@@ -412,7 +420,8 @@ void SDL3Device::uploadImmediate(RHIBuffer dst, const void* data, uint64_t size,
     SDL_ReleaseGPUTransferBuffer(m_gpu, tb);
 }
 
-void SDL3Device::uploadImmediateTexture(RHITexture dst, const void* data, uint64_t size, uint32_t mipLevel) {
+void SDL3Device::uploadImmediateTexture(RHITexture dst, const void* data, uint64_t size,
+                                        uint32_t width, uint32_t height, uint32_t mipLevel) {
     SDL_GPUTransferBufferCreateInfo tbInfo{};
     tbInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
     tbInfo.size  = static_cast<uint32_t>(size);
@@ -431,15 +440,67 @@ void SDL3Device::uploadImmediateTexture(RHITexture dst, const void* data, uint64
     SDL_GPUTextureTransferInfo src{};
     src.transfer_buffer = tb;
     src.offset          = 0;
+    src.pixels_per_row  = width;
+    src.rows_per_layer  = height;
 
     SDL_GPUTextureRegion region{};
     region.texture   = static_cast<SDL_GPUTexture*>(dst.ptr);
     region.mip_level = mipLevel;
     region.layer     = 0;
+    region.w         = width;
+    region.h         = height;
+    region.d         = 1;
 
     SDL_UploadToGPUTexture(copy, &src, &region, false);
     SDL_EndGPUCopyPass(copy);
     SDL_SubmitGPUCommandBuffer(cmd);
+    SDL_ReleaseGPUTransferBuffer(m_gpu, tb);
+}
+
+void SDL3Device::debugDownloadTexture(RHITexture tex, uint32_t w, uint32_t h, const char* path) {
+    const uint32_t bytes = w * h * 4;
+    SDL_GPUTransferBufferCreateInfo tbInfo{};
+    tbInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD;
+    tbInfo.size  = bytes;
+    SDL_GPUTransferBuffer* tb = SDL_CreateGPUTransferBuffer(m_gpu, &tbInfo);
+    sdlCheck(tb != nullptr, "debug CreateGPUTransferBuffer");
+
+    SDL_GPUCommandBuffer* cmd = SDL_AcquireGPUCommandBuffer(m_gpu);
+    SDL_GPUCopyPass* copy     = SDL_BeginGPUCopyPass(cmd);
+    SDL_GPUTextureRegion region{};
+    region.texture = static_cast<SDL_GPUTexture*>(tex.ptr);
+    region.w = w; region.h = h; region.d = 1;
+    SDL_GPUTextureTransferInfo dst{};
+    dst.transfer_buffer = tb;
+    dst.pixels_per_row  = w;
+    dst.rows_per_layer  = h;
+    SDL_DownloadFromGPUTexture(copy, &region, &dst);
+    SDL_EndGPUCopyPass(copy);
+    SDL_GPUFence* fence = SDL_SubmitGPUCommandBufferAndAcquireFence(cmd);
+    SDL_WaitForGPUFences(m_gpu, true, &fence, 1);
+    SDL_ReleaseGPUFence(m_gpu, fence);
+
+    void* mapped = SDL_MapGPUTransferBuffer(m_gpu, tb, false);
+    sdlCheck(mapped != nullptr, "debug MapGPUTransferBuffer");
+    const uint8_t* px = static_cast<const uint8_t*>(mapped);
+
+    bool isBGRA = (SDL_GetGPUSwapchainTextureFormat(m_gpu, m_window) == SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM);
+    SDL_IOStream* io = SDL_IOFromFile(path, "wb");
+    if (io) {
+        char header[64];
+        int hn = SDL_snprintf(header, sizeof(header), "P6\n%u %u\n255\n", w, h);
+        SDL_WriteIO(io, header, hn);
+        std::vector<uint8_t> rgb(w * h * 3);
+        for (uint32_t i = 0; i < w * h; ++i) {
+            uint8_t r = px[i*4+0], g = px[i*4+1], b = px[i*4+2];
+            if (isBGRA) { uint8_t t = r; r = b; b = t; }
+            rgb[i*3+0] = r; rgb[i*3+1] = g; rgb[i*3+2] = b;
+        }
+        SDL_WriteIO(io, rgb.data(), rgb.size());
+        SDL_CloseIO(io);
+        SDL_Log("[capture] wrote %s (%ux%u, %s)", path, w, h, isBGRA ? "BGRA" : "RGBA");
+    }
+    SDL_UnmapGPUTransferBuffer(m_gpu, tb);
     SDL_ReleaseGPUTransferBuffer(m_gpu, tb);
 }
 
@@ -453,8 +514,17 @@ bool SDL3CommandList::acquire() {
     if (!m_cmd)
         return false;
     m_swapchainTex = nullptr;
-    if (!SDL_WaitAndAcquireGPUSwapchainTexture(m_cmd, m_window, &m_swapchainTex, nullptr, nullptr))
+    if (!SDL_WaitAndAcquireGPUSwapchainTexture(m_cmd, m_window, &m_swapchainTex, nullptr, nullptr)) {
+        SDL_CancelGPUCommandBuffer(m_cmd);
+        m_cmd = nullptr;
         return false;
+    }
+    if (!m_swapchainTex) {
+        // Swapchain unavailable this frame (window resize / occlusion); submit empty cmd.
+        SDL_SubmitGPUCommandBuffer(m_cmd);
+        m_cmd = nullptr;
+        return false;
+    }
     return true;
 }
 

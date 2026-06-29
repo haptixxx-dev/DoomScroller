@@ -129,16 +129,16 @@ Fast-paced 3D FPS. Doom / ULTRAKILL / HyperDemon style. Arena combat, aggressive
 
 | # | Task | Depends on | Key deliverable |
 |---|------|-----------|-----------------|
-| 1 | **Texture loading** | - | stb_image, GPU upload, sampler, UV in `Vertex` + shader |
-| 2 | **Mesh loading (cgltf)** | 1 | Load `.glb`, generalize geometry pipeline beyond cube |
-| 3 | **ECS (EnTT)** | - | `Transform`, `Mesh`, `Material` components; EnTT world in `Engine` |
-| 4 | **Transform system** | 3 | Position/rotation/scale per entity, model matrix, MVP = proj*view*model |
-| 5 | **Arena level geometry** | 2, 4 | Simple box room from glTF or procedural; first walkable space |
-| 6 | **Basic lighting** | 5 | Normal in `Vertex`, ambient+directional in fragment shader |
-| 7 | **Jolt physics** | 4 | Rigid body world, player capsule, collision vs. level, gravity |
-| 8 | **Player controller** | 7 | Ground-based movement (jump, sprint); replaces fly camera |
-| 9 | **Enemy entity** | 8 | Spawn point, idle/chase/attack state machine, placeholder mesh |
-| 10 | **Weapon + hitscan** | 9 | Ray cast via Jolt, damage component, enemy death; closes game loop |
+| 1 | ~~**Texture loading**~~ | - | stb_image, GPU upload, sampler, UV in `Vertex` + shader |
+| 2 | ~~**Mesh loading (cgltf)**~~ | 1 | Load `.glb`, generalize geometry pipeline beyond cube |
+| 3 | ~~**ECS (EnTT)**~~ | - | `Transform`, `Mesh`, `Material` components; EnTT world in `Engine` |
+| 4 | ~~**Transform system**~~ | 3 | Position/rotation/scale per entity, model matrix, MVP = proj*view*model |
+| 5 | ~~**Arena level geometry**~~ | 2, 4 | Simple box room from glTF or procedural; first walkable space |
+| 6 | ~~**Basic lighting**~~ | 5 | Normal in `Vertex`, ambient+directional in fragment shader |
+| 7 | ~~**Jolt physics**~~ | 4 | Rigid body world, player capsule, collision vs. level, gravity |
+| 8 | ~~**Player controller**~~ | 7 | Ground-based movement (jump, sprint); replaces fly camera |
+| 9 | ~~**Enemy entity**~~ | 8 | Spawn point, idle/chase/attack state machine, placeholder mesh |
+| 10 | ~~**Weapon + hitscan**~~ | 9 | Ray cast via Jolt, damage component, enemy death; closes game loop |
 
 #### Task 1 - Texture loading
 - Add `glm::vec2 uv` to `Vertex` struct
