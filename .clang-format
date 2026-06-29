@@ -1,6 +1,6 @@
 ---
 Language: Cpp
-Standard: c++23
+Standard: Latest
 BasedOnStyle: LLVM
 IndentWidth: 4
 TabWidth: 4
