@@ -20,7 +20,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        include:
+          - os: ubuntu-latest
+            cmake_extra: -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+          - os: macos-latest
+            cmake_extra: -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+          - os: windows-latest
+            cmake_extra: ""
 
     steps:
       - uses: actions/checkout@v4
@@ -44,7 +50,20 @@ jobs:
         if: runner.os == 'macOS'
         run: brew install ninja
 
+      - name: Set up MSVC + Ninja (Windows)
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Install Vulkan SDK (Windows)
+        if: runner.os == 'Windows'
+        uses: humbletim/setup-vulkan-sdk@v1.2.1
+        with:
+          vulkan-query-version: 1.3.290.0
+          vulkan-components: Vulkan-Headers, Vulkan-Loader
+          vulkan-use-cache: true
+
       - name: Set up ccache
+        if: runner.os != 'Windows'
         uses: hendrikmuhs/ccache-action@v1.2
         with:
           key: ${{ runner.os }}-cmake
@@ -57,7 +76,7 @@ jobs:
           key: slang-${{ runner.os }}-2026.12
 
       - name: Configure
-        run: cmake --preset release -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+        run: cmake --preset release ${{ matrix.cmake_extra }}
 
       - name: Build
         run: cmake --build --preset release --parallel
