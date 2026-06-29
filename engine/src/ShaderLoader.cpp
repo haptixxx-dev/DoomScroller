@@ -24,7 +24,8 @@ ShaderLoader::ShaderLoader(SDL_GPUDevice* device, std::filesystem::path shaderDi
     }
 }
 
-rhi::RHIShader ShaderLoader::load(rhi::IRHIDevice& device, const std::string& name, rhi::ShaderStage stage) {
+rhi::RHIShader ShaderLoader::load(rhi::IRHIDevice& device, const std::string& name, rhi::ShaderStage stage,
+                                  uint32_t numSamplers, uint32_t numUniformBuffers) {
     const char* stageStr = stage == rhi::ShaderStage::Vertex     ? "vertex"
                            : stage == rhi::ShaderStage::Fragment ? "fragment"
                                                                  : "compute";
@@ -47,11 +48,13 @@ rhi::RHIShader ShaderLoader::load(rhi::IRHIDevice& device, const std::string& na
         buf[size] = '\0';
 
     rhi::ShaderDesc desc{};
-    desc.stage        = stage;
-    desc.format       = m_format;
-    desc.bytecode     = buf.data();
-    desc.bytecodeSize = static_cast<size_t>(isMSL ? size + 1 : size);
-    desc.entryPoint   = stage == rhi::ShaderStage::Vertex ? "vertMain" : "fragMain";
+    desc.stage             = stage;
+    desc.format            = m_format;
+    desc.bytecode          = buf.data();
+    desc.bytecodeSize      = static_cast<size_t>(isMSL ? size + 1 : size);
+    desc.entryPoint        = stage == rhi::ShaderStage::Vertex ? "vertMain" : "fragMain";
+    desc.numSamplers       = numSamplers;
+    desc.numUniformBuffers = numUniformBuffers;
 
     return device.createShader(desc);
 }

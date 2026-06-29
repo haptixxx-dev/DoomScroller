@@ -1,29 +1,27 @@
-// Bootstrap triangle shader - no vertex buffer, positions generated in shader.
-// Draws a single full-screen-ish triangle using vertex index.
+struct VSInput {
+    float3 pos   : POSITION0;
+    float3 color : COLOR0;
+};
 
 struct VSOutput {
     float4 position : SV_Position;
     float3 color    : COLOR0;
 };
 
+struct MVPConstants {
+    column_major float4x4 mvp;
+};
+
+// SPIRV: descriptor set 1, binding 0 (SDL3 vertex uniform slot 0)
+// MSL:   [[buffer(1)]]  (after vertex buffer at slot 0)
+[vk::binding(0, 1)]
+ConstantBuffer<MVPConstants> gMVP : register(b1);
+
 [shader("vertex")]
-VSOutput vertMain(uint vertexID : SV_VertexID) {
-    // Clip-space positions for a CCW triangle covering most of the screen
-    float2 positions[3] = {
-        float2( 0.0,  0.5),
-        float2( 0.5, -0.5),
-        float2(-0.5, -0.5),
-    };
-
-    float3 colors[3] = {
-        float3(1.0, 0.0, 0.0),
-        float3(0.0, 1.0, 0.0),
-        float3(0.0, 0.0, 1.0),
-    };
-
+VSOutput vertMain(VSInput v) {
     VSOutput out;
-    out.position = float4(positions[vertexID], 0.0, 1.0);
-    out.color    = colors[vertexID];
+    out.position = mul(gMVP.mvp, float4(v.pos, 1.0));
+    out.color    = v.color;
     return out;
 }
 

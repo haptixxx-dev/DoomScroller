@@ -219,6 +219,29 @@ void SDL3Device::destroyShader(RHIShader shader) {
 // ---------------------------------------------------------------------------
 // Pipeline
 // ---------------------------------------------------------------------------
+static SDL_GPUCompareOp toSDLCompareOp(CompareOp op) {
+    switch (op) {
+    case CompareOp::Never:
+        return SDL_GPU_COMPAREOP_NEVER;
+    case CompareOp::Less:
+        return SDL_GPU_COMPAREOP_LESS;
+    case CompareOp::Equal:
+        return SDL_GPU_COMPAREOP_EQUAL;
+    case CompareOp::LessEqual:
+        return SDL_GPU_COMPAREOP_LESS_OR_EQUAL;
+    case CompareOp::Greater:
+        return SDL_GPU_COMPAREOP_GREATER;
+    case CompareOp::NotEqual:
+        return SDL_GPU_COMPAREOP_NOT_EQUAL;
+    case CompareOp::GreaterEqual:
+        return SDL_GPU_COMPAREOP_GREATER_OR_EQUAL;
+    case CompareOp::Always:
+        return SDL_GPU_COMPAREOP_ALWAYS;
+    default:
+        return SDL_GPU_COMPAREOP_LESS;
+    }
+}
+
 SDL_GPUVertexElementFormat SDL3Device::toSDLVertexFormat(const VertexAttribute& attr) const {
     if (!attr.isFloat)
         return SDL_GPU_VERTEXELEMENTFORMAT_UINT;
@@ -308,6 +331,7 @@ RHIPipeline SDL3Device::createPipeline(const PipelineDesc& desc) {
 
     info.depth_stencil_state.enable_depth_test  = desc.depthTest;
     info.depth_stencil_state.enable_depth_write = desc.depthWrite;
+    info.depth_stencil_state.compare_op         = toSDLCompareOp(desc.depthCompare);
 
     info.target_info.color_target_descriptions = colorDescs.data();
     info.target_info.num_color_targets         = static_cast<uint32_t>(colorDescs.size());

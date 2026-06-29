@@ -20,7 +20,8 @@ class ShaderLoader {
     explicit ShaderLoader(SDL_GPUDevice* device, std::filesystem::path shaderDir);
 
     // Loads and creates a shader. Throws on failure.
-    rhi::RHIShader load(rhi::IRHIDevice& device, const std::string& name, rhi::ShaderStage stage);
+    rhi::RHIShader load(rhi::IRHIDevice& device, const std::string& name, rhi::ShaderStage stage,
+                        uint32_t numSamplers = 0, uint32_t numUniformBuffers = 0);
 
   private:
     SDL_GPUDevice* m_gpu;

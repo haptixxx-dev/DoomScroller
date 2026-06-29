@@ -1,7 +1,10 @@
 #pragma once
 
+#include "engine/Camera.h"
+
 #include <SDL3/SDL.h>
 
+#include <glm/glm.hpp>
 #include <memory>
 #include <string_view>
 
@@ -13,6 +16,11 @@ struct EngineConfig {
     std::string_view title = "DoomScroller";
     int width              = 1280;
     int height             = 720;
+};
+
+struct Vertex {
+    glm::vec3 pos;
+    glm::vec3 color;
 };
 
 class Engine {
@@ -31,7 +39,7 @@ class Engine {
     void processEvents();
     void update();
     void render();
-    void initTriangle();
+    void initScene();
 
     SDL_Window* m_window = nullptr;
     std::unique_ptr<rhi::IRHIDevice> m_device;
@@ -40,6 +48,17 @@ class Engine {
     rhi::RHIShader m_triangleVS         = {};
     rhi::RHIShader m_triangleFS         = {};
     rhi::RHIPipeline m_trianglePipeline = {};
+    rhi::RHIBuffer m_vertexBuffer       = {};
+    rhi::RHIBuffer m_indexBuffer        = {};
+    rhi::RHITexture m_depthTexture      = {};
+    uint32_t m_indexCount               = 0;
+
+    Camera m_camera;
+    int m_windowWidth  = 1280;
+    int m_windowHeight = 720;
+
+    uint64_t m_lastTick = 0;
+    float m_dt          = 0.f;
 };
 
 } // namespace ds

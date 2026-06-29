@@ -13,6 +13,7 @@ target_include_directories(engine_headers INTERFACE
 
 add_library(engine STATIC
     src/Engine.cpp
+    src/Camera.cpp
     src/Paths.cpp
     src/ShaderLoader.cpp
     src/rhi/sdl3/SDL3Device.cpp
@@ -26,7 +27,9 @@ target_include_directories(engine
         ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 
-target_link_libraries(engine PUBLIC SDL3::SDL3-static TracyClient mimalloc-static)
+target_link_libraries(engine PUBLIC SDL3::SDL3-static TracyClient mimalloc-static glm::glm)
+
+target_compile_definitions(engine PUBLIC GLM_FORCE_DEPTH_ZERO_TO_ONE)
 
 if(DS_DEV)
     target_compile_definitions(engine PUBLIC DS_DEV)
