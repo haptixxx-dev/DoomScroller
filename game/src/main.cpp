@@ -1,8 +1,11 @@
 #include "engine/Engine.h"
+#include "engine/Paths.h"
 #include <cstdlib>
 #include <iostream>
 
-int main() {
+int main(int /*argc*/, char* argv[]) {
+    ds::paths::init(argv[0]);
+
     try {
         ds::EngineConfig cfg;
         cfg.title  = "DoomScroller";
