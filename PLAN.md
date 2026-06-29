@@ -1,4 +1,4 @@
-# DoomScroller — Architecture Plan
+# DoomScroller - Architecture Plan
 
 ## Game
 Fast-paced 3D FPS. Doom / ULTRAKILL / HyperDemon style. Arena combat, aggressive movement.
@@ -7,9 +7,9 @@ Fast-paced 3D FPS. Doom / ULTRAKILL / HyperDemon style. Arena combat, aggressive
 | Spec | Minimum | Enhanced |
 |------|---------|----------|
 | GPU | GTX 1060 3GB | RTX 20xx / RDNA2 / Arc |
-| CPU | Intel 10th gen | — |
-| RAM | 16 GB | — |
-| VRAM budget | < 2 GB assets | uncapped |
+| CPU | Intel i5 10th gen | Intel i5 13th gen |
+| RAM | 16 GB | 32 GB |
+| VRAM budget | < 2 GB assets | 6 GB |
 
 ---
 
@@ -27,7 +27,7 @@ Fast-paced 3D FPS. Doom / ULTRAKILL / HyperDemon style. Arena combat, aggressive
   - Engine code talks only to RHI interface
   - SDL3 GPU backend ships first
   - Vulkan / Metal backends added later without touching engine code
-- **Render path (base)**: Forward rendering — lower VRAM pressure, sufficient for doom-style light counts
+- **Render path (base)**: Forward rendering - lower VRAM pressure, sufficient for doom-style light counts
 - **Render path (enhanced)**: Mesh shader pipeline on capable hardware (Vulkan `VK_EXT_mesh_shader` / DX12 / Metal mesh shaders)
 - **Tier selection**: runtime capability query at startup
 
@@ -53,45 +53,41 @@ Fast-paced 3D FPS. Doom / ULTRAKILL / HyperDemon style. Arena combat, aggressive
 ## Decided (continued)
 
 ### Entity System
-- **entt** (submodule) — ECS, cache-friendly, scales to 10k+ entities
+- **entt** (submodule) - ECS, cache-friendly, scales to 10k+ entities
 
 ### Physics
-- **Jolt** (submodule) — MIT, multithreaded, modern, capable of scaling to complex simulation
+- **Jolt** (submodule) - MIT, multithreaded, modern, capable of scaling to complex simulation
 
 ### Audio
-- **miniaudio** (submodule, header-only) — 3D spatialization, effects, zero deps
+- **miniaudio** (submodule, header-only) - 3D spatialization, effects, zero deps
 - Future: may migrate to FMOD or expand; keep audio calls behind internal API when scope allows
 
 ### Memory
-- **Frame arena** — per-frame scratch allocation, O(1) bump, free-all at frame end
-- **Pool allocators** — fixed-size blocks for entities, components
-- **mimalloc** (submodule) — base general allocator replacing new/delete everywhere else
+- **Frame arena** - per-frame scratch allocation, O(1) bump, free-all at frame end
+- **Pool allocators** - fixed-size blocks for entities, components
+- **mimalloc** (submodule) - base general allocator replacing new/delete everywhere else
 - No custom allocator replaces mimalloc; arenas/pools sit on top for hot paths
 
 ### Level Format
-- **Custom binary** — runtime format, fast load, engine-tailored
-- **External converter tool** (separate project) — glTF / other → custom binary, enables modding support
+- **Custom binary** - runtime format, fast load, engine-tailored
+- **External converter tool** (separate project) - glTF / other → custom binary, enables modding support
 
 ### Scripting
-- **Lua 5.4** (submodule) — game logic, modding, internal dev automation
+- **Lua 5.4** (submodule) - game logic, modding, internal dev automation
 - Binding layer needed between C++ engine and Lua VM
 
 ### Asset Pipeline
-- **Shipping**: offline cook step — source assets → cook tool → engine binary format (BC7 textures, packed geometry)
-- **Dev mode** (`DS_DEV`): runtime load from source (glTF, PNG) — fast iteration, no cook step
+- **Shipping**: offline cook step - source assets → cook tool → engine binary format (BC7 textures, packed geometry)
+- **Dev mode** (`DS_DEV`): runtime load from source (glTF, PNG) - fast iteration, no cook step
 - External converter tool (separate project) handles glTF → binary; doubles as modding entry point
 
 ### Shaders
-- **Shipping**: pre-compiled bytecode (SPIRV / MSL / DXIL) — zero startup cost, no compiler linked
+- **Shipping**: pre-compiled bytecode (SPIRV / MSL / DXIL) - zero startup cost, no compiler linked
 - **Dev mode** (`DS_DEV`): filesystem watcher on `shaders/*.hlsl` → recompile via SDL_shadercross → hot-swap pipeline without restart
 - SDL_shadercross linked only in dev builds
 
 ### Networking
-- Out of scope — singleplayer first. No architectural hooks needed now.
-
-## To Decide
-
-- [ ] Nothing blocking — ready to implement
+- Out of scope - singleplayer first.
 
 ---
 
