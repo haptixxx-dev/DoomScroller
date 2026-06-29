@@ -66,8 +66,9 @@ function(ds_compile_slang)
         endforeach()
     endforeach()
 
-    # Custom target that builds all shader outputs
-    string(REPLACE "/" "_" _tgt_name "shaders_${ARG_OUT_DIR}")
+    # Custom target that builds all shader outputs.
+    # Sanitize path into valid CMake target name (colons/slashes illegal on Windows).
+    string(REGEX REPLACE "[^a-zA-Z0-9_]" "_" _tgt_name "shaders_${ARG_OUT_DIR}")
     add_custom_target("${_tgt_name}" ALL DEPENDS ${_all_outputs})
 
     # Export output list and directory for callers
