@@ -124,79 +124,110 @@ Fast-paced 3D FPS. Doom / ULTRAKILL / HyperDemon style. Arena combat, aggressive
 - [x] GLM wired + `column_major` MVP push constants (SPIRV set=1 binding=0, MSL `[[buffer(1)]]`)
 - [x] FPS camera (`Camera`, `lookAt`+`perspective`, WASD+mouse look, dt-scaled)
 - [x] Depth buffer (D32Float, `clearDepth=1.0`, `CompareOp::Less`, fixed missing compare op)
+- [x] Texture loading (stb_image, `TextureManager`, sampler, UV in `Vertex`+shader)
+- [x] Mesh loading (cgltf, `MeshLoader`, POSITION/NORMAL/TEXCOORD_0)
+- [x] ECS (EnTT registry, `Transform`/`Mesh`/`Material`/`Enemy`/`Weapon`/`SpawnPoint`)
+- [x] Transform system (TRS `modelMatrix()`, MVP+model push constants)
+- [x] Arena geometry (20x5x20 box room, inward normals, tiled checkerboard)
+- [x] Basic lighting (vertex normals, Lambertian + ambient, hardcoded sun)
+- [x] Jolt physics (`PhysicsWorld` PIMPL, static boxes, capsules, raycasts)
+- [x] Player controller (capsule, ground WASD, coyote jump, eye offset)
+- [x] Enemy entity (3 spawns, idle/chase/attack FSM, physics-synced, red box)
+- [x] Weapon hitscan (`castRay` from camera, damage by bodyId, enemy death)
+- [x] Fix: push constants `register(b0)` (SDL3 Metal vert uniform = buffer 0)
+- [x] Fix: shutdown malloc crash (force-load mimalloc `__interpose` on macOS)
+- [x] `engine_math` test target + `ds_engine_tests` (Transform/Camera/component math)
 
 ### Next (in order)
 
+Loop is closed (move, shoot, kill). Phase 2 = make it a *game* that feels good:
+two-way combat, feedback (audio/UI/VFX), movement tech, content pipeline.
+
 | # | Task | Depends on | Key deliverable |
 |---|------|-----------|-----------------|
-| 1 | ~~**Texture loading**~~ | - | stb_image, GPU upload, sampler, UV in `Vertex` + shader |
-| 2 | ~~**Mesh loading (cgltf)**~~ | 1 | Load `.glb`, generalize geometry pipeline beyond cube |
-| 3 | ~~**ECS (EnTT)**~~ | - | `Transform`, `Mesh`, `Material` components; EnTT world in `Engine` |
-| 4 | ~~**Transform system**~~ | 3 | Position/rotation/scale per entity, model matrix, MVP = proj*view*model |
-| 5 | ~~**Arena level geometry**~~ | 2, 4 | Simple box room from glTF or procedural; first walkable space |
-| 6 | ~~**Basic lighting**~~ | 5 | Normal in `Vertex`, ambient+directional in fragment shader |
-| 7 | ~~**Jolt physics**~~ | 4 | Rigid body world, player capsule, collision vs. level, gravity |
-| 8 | ~~**Player controller**~~ | 7 | Ground-based movement (jump, sprint); replaces fly camera |
-| 9 | ~~**Enemy entity**~~ | 8 | Spawn point, idle/chase/attack state machine, placeholder mesh |
-| 10 | ~~**Weapon + hitscan**~~ | 9 | Ray cast via Jolt, damage component, enemy death; closes game loop |
+| 11 | **Player health + enemy attacks** | - | Enemies deal damage, player health, death + respawn; two-way combat |
+| 12 | **Audio (miniaudio)** | - | `AudioSystem`, spatial SFX (shots/hits/death), music bus, volume |
+| 13 | **HUD / UI overlay** | 11 | 2D pass: crosshair, health/ammo, enemy count, damage flash |
+| 14 | **VFX / particle system** | - | Instanced billboards: muzzle flash, blood, impact sparks, explosions |
+| 15 | **Dynamic lights** | 14 | Multi-light forward, point lights, muzzle-flash + explosion light |
+| 16 | **Movement tech** | 11 | Dash (i-frames), slide, air control; ULTRAKILL/HyperDemon feel |
+| 17 | **Projectile weapons + switching** | 14 | Rocket/plasma (travel + splash), weapon slots, per-weapon stats |
+| 18 | **Wave spawner + game state** | 11, 13 | State machine (menu/play/dead), wave system, score, win/lose |
+| 19 | **Level format + loader** | - | Custom binary level, converter tool stub, load arena from file |
+| 20 | **Lua scripting hooks** | 18 | Bind spawn/wave/event API, data-drive enemy stats + wave config |
 
-#### Task 1 - Texture loading
-- Add `glm::vec2 uv` to `Vertex` struct
-- `stb_image` decode + `uploadImmediateTexture` to `RHITexture`
-- `createSampler` (linear, repeat); `TextureManager` or simple cache by path
-- Update `triangle.slang` (or new `mesh.slang`): `Texture2D` + `SamplerState`, sample in frag
-- Update `ShaderLoader`/pipeline: `numSamplers=1` for fragment shader
-- Wire `bindFragmentTexture` in render loop
+#### Task 11 - Player health + enemy attacks
+- `HealthComponent` (current/max); attach to player entity
+- Enemy `Attack` state: when in `attackRange`, deal damage on cooldown
+- Melee (contact) damage first; ranged enemy projectiles deferred to task 17
+- Player death: `m_running` stays, transition to dead state (task 18 hooks this)
+- Respawn: reset player capsule to spawn, restore health, clear/reset enemies
+- I-frame timer field on player for task 16 dash
 
-#### Task 2 - Mesh loading (cgltf)
-- `Mesh` struct: `RHIBuffer vertexBuffer, indexBuffer; uint32_t indexCount; IndexType indexType`
-- `MeshLoader::load(path)` via `cgltf`: parse positions, normals, UVs, indices
-- Support multiple primitives per glTF mesh
-- Generalize `Engine::render` to draw from `Mesh` rather than hardcoded cube buffers
+#### Task 12 - Audio (miniaudio)
+- `AudioSystem` wrapper: `ma_engine` init/shutdown, master volume
+- One-shot SFX: `play(soundId)`; 3D spatial: `playAt(soundId, pos)` with listener = camera
+- Sound assets via `ds::paths::assets()`; cache decoded sounds by path
+- Hook events: weapon fire, enemy hit, enemy death, player hit, footstep
+- Music bus (looping), separate volume from SFX
+- Keep behind internal API (FMOD migration path per PLAN)
 
-#### Task 3 - ECS (EnTT)
-- Add `entt::registry m_world` to `Engine`
-- Components: `Transform`, `MeshComponent`, `MaterialComponent`
-- System-style free functions: `renderSystem(registry, cmd, camera)`
-- Keep engine-owned resources (device, window) separate from ECS
+#### Task 13 - HUD / UI overlay
+- 2D render pass after 3D: orthographic, no depth, alpha blend
+- `ui.slang`: textured quad shader (`pos`+`uv`+`color`), screen-space coords
+- Crosshair (center), health bar, ammo counter, enemy/wave count
+- Bitmap font or stb_truetype for numbers/text
+- Damage flash (red vignette quad on player hit), low-health pulse
+- `UISystem` immediate-mode helpers: `drawQuad`, `drawText`
 
-#### Task 4 - Transform system
-- `Transform`: `glm::vec3 position`, `glm::quat rotation`, `glm::vec3 scale`
-- `modelMatrix()` computed from TRS decomposition
-- MVP push = `proj * view * entity.transform.modelMatrix()`
-- Optional: dirty flag + cached matrix
+#### Task 14 - VFX / particle system
+- `ParticleSystem`: pooled CPU particles, GPU instanced billboard draw
+- `particle.slang`: instanced quads, camera-facing, per-instance pos/size/color/uv
+- Emitters: muzzle flash, blood burst (enemy hit), impact sparks (wall), explosion
+- Additive blend for sparks/flash, alpha for blood/smoke
+- Lifetime, velocity, gravity, fade; `emit(type, pos, dir, count)`
+- Replaces "future" muzzle-flash placeholder from task 10
 
-#### Task 5 - Arena level geometry
-- Hand-authored box room as glTF (or procedural via code)
-- Floor/walls/ceiling as static mesh entities
-- No collision yet - visual walkthrough only
+#### Task 15 - Dynamic lights
+- Forward multi-light: `LightComponent` (point: pos, color, radius, intensity)
+- Push/UBO array of N lights (cap ~8-16) to `mesh.slang` fragment
+- Per-fragment accumulate: attenuation `1/(d^2)` clamped to radius
+- Transient lights: muzzle flash (1-2 frames), explosion flash, projectile glow
+- Light culling deferred (small counts fine for arena)
 
-#### Task 6 - Basic lighting
-- Add `glm::vec3 normal` to `Vertex`; update vertex attributes
-- New `mesh.slang` (or extend triangle.slang): Blinn-Phong or Lambertian diffuse
-- `LightConstants` push: `vec3 lightDir`, `vec3 lightColor`, `vec3 ambientColor`
-- Phong requires normals in world space: push `normalMatrix = transpose(inverse(model))`
+#### Task 16 - Movement tech
+- Extend `PlayerController`: `dash(dir)` - impulse burst + i-frames + cooldown
+- Slide: crouch while sprinting -> lower capsule, preserve momentum, friction curve
+- Air control tuning, ground accel/decel curves (ULTRAKILL-style snappy)
+- Dash charges (regen over time), dash SFX/VFX hook (tasks 12/14)
+- Tie i-frames to `HealthComponent` damage gate from task 11
 
-#### Task 7 - Jolt physics
-- `PhysicsWorld` wrapper: `JPH::PhysicsSystem`, `JPH::BodyInterface`
-- Static mesh body for level (triangle mesh shape)
-- Player capsule: `JPH::CharacterVirtual` or kinematic capsule
-- `PhysicsWorld::step(dt)` called from `Engine::update`
+#### Task 17 - Projectile weapons + switching
+- `ProjectileComponent`: velocity, damage, lifetime, splash radius, owner
+- Projectile system: integrate motion, Jolt collision query, splash damage falloff
+- Weapon types: hitscan (done), rocket (travel+splash), plasma (fast projectile)
+- `WeaponComponent` -> weapon slots array; number keys / wheel to switch
+- Per-weapon: damage, fire rate, projectile type, ammo, muzzle VFX/SFX
+- Splash spawns explosion VFX + light (tasks 14/15)
 
-#### Task 8 - Player controller
-- `PlayerController`: wraps Jolt capsule, exposes `move(dir, dt)`, `jump()`
-- Replace fly-camera WASD with ground-projected movement
-- Preserve mouse look in `Camera`; camera follows capsule position + eye offset
-- Ground check, coyote time, variable jump
+#### Task 18 - Wave spawner + game state
+- `GameState` enum: `Menu`, `Playing`, `Dead`, `Victory`; `Engine` owns current
+- Wave system: spawn N enemies per wave from `SpawnPoint`s, escalate count/type
+- Wave clear detection -> next wave (delay/intermission)
+- Score: kills, time, combo; persist high score to file
+- Menu + game-over screens via UI (task 13); restart resets world
+- Player death (task 11) -> `Dead` state
 
-#### Task 9 - Enemy entity
-- `EnemyComponent`: health, state (idle/chase/attack), target entity
-- `EnemySystem::update(registry, dt, playerPos)`
-- Spawn from a `SpawnPoint` component (position in level)
-- Placeholder mesh (capsule or cube); Jolt dynamic body
+#### Task 19 - Level format + loader
+- Custom binary level format: header, static geometry, spawn points, light defs
+- `LevelLoader::load(path)` -> populate ECS (static meshes, spawns, lights)
+- Converter tool stub (`tools/`): glTF -> custom binary (offline cook)
+- Replace hardcoded `buildArena` with loaded level
+- Versioned format; embed material/texture refs by path
 
-#### Task 10 - Weapon + hitscan
-- `WeaponComponent` on player entity: fire rate, damage, ammo
-- Left-click fires: `JPH::RayCastResult` from camera origin along front vector
-- Hit enemy: subtract health via `HealthComponent`; enemy death removes entity
-- Visual feedback: muzzle flash (point light one frame), hit decal (future)
+#### Task 20 - Lua scripting hooks
+- `ScriptSystem`: `lua_State` lifecycle, error reporting, `DS_DEV` reload
+- Bind core API: spawn enemy, set wave config, query/modify entity, events
+- Data-drive enemy stats (health/speed/damage) + wave layout from `.lua`
+- Event callbacks: `onWaveStart`, `onEnemyDeath`, `onPlayerDeath`
+- Sandbox: no io/os in shipped builds; keep binding layer thin
