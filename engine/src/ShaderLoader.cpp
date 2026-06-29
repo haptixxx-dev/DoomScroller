@@ -1,13 +1,13 @@
 #include "engine/ShaderLoader.h"
+
 #include <fstream>
-#include <vector>
 #include <stdexcept>
+#include <vector>
 
 namespace ds {
 
 ShaderLoader::ShaderLoader(SDL_GPUDevice* device, std::filesystem::path shaderDir)
-    : m_gpu(device), m_dir(std::move(shaderDir))
-{
+    : m_gpu(device), m_dir(std::move(shaderDir)) {
     SDL_GPUShaderFormat supported = SDL_GetGPUShaderFormats(m_gpu);
 
     if (supported & SDL_GPU_SHADERFORMAT_MSL) {
@@ -24,13 +24,10 @@ ShaderLoader::ShaderLoader(SDL_GPUDevice* device, std::filesystem::path shaderDi
     }
 }
 
-rhi::RHIShader ShaderLoader::load(rhi::IRHIDevice& device,
-                                   const std::string& name,
-                                   rhi::ShaderStage   stage)
-{
-    const char* stageStr = stage == rhi::ShaderStage::Vertex   ? "vertex"
-                         : stage == rhi::ShaderStage::Fragment ? "fragment"
-                                                               : "compute";
+rhi::RHIShader ShaderLoader::load(rhi::IRHIDevice& device, const std::string& name, rhi::ShaderStage stage) {
+    const char* stageStr = stage == rhi::ShaderStage::Vertex     ? "vertex"
+                           : stage == rhi::ShaderStage::Fragment ? "fragment"
+                                                                 : "compute";
 
     std::filesystem::path path = m_dir / (name + "." + stageStr + "." + m_ext);
 
@@ -46,7 +43,8 @@ rhi::RHIShader ShaderLoader::load(rhi::IRHIDevice& device,
     std::vector<char> buf(isMSL ? size + 1 : size);
     if (!file.read(buf.data(), size))
         throw std::runtime_error("ShaderLoader: read failed " + path.string());
-    if (isMSL) buf[size] = '\0';
+    if (isMSL)
+        buf[size] = '\0';
 
     rhi::ShaderDesc desc{};
     desc.stage        = stage;

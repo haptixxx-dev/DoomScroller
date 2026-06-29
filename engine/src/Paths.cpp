@@ -1,16 +1,17 @@
 #include "engine/Paths.h"
+
 #include "engine/BuildConfig.h"
+
 #include <stdexcept>
 
 namespace ds::paths {
 
 namespace {
-    std::filesystem::path g_binDir;
+std::filesystem::path g_binDir;
 }
 
 void init(const char* argv0) {
-    g_binDir = std::filesystem::canonical(
-        std::filesystem::path(argv0).parent_path());
+    g_binDir = std::filesystem::canonical(std::filesystem::path(argv0).parent_path());
 }
 
 std::filesystem::path binDir() {

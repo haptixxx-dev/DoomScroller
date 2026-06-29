@@ -1,5 +1,6 @@
-#include <catch2/catch_test_macros.hpp>
 #include "engine/rhi/RHITypes.h"
+
+#include <catch2/catch_test_macros.hpp>
 
 using namespace ds::rhi;
 
@@ -19,19 +20,19 @@ TEST_CASE("Handle validity", "[rhi]") {
 
 TEST_CASE("ShaderDesc defaults", "[rhi]") {
     ShaderDesc desc{};
-    REQUIRE(desc.stage        == ShaderStage::Vertex);
-    REQUIRE(desc.format       == ShaderFormat::SPIRV);
-    REQUIRE(desc.bytecode     == nullptr);
+    REQUIRE(desc.stage == ShaderStage::Vertex);
+    REQUIRE(desc.format == ShaderFormat::SPIRV);
+    REQUIRE(desc.bytecode == nullptr);
     REQUIRE(desc.bytecodeSize == 0);
-    REQUIRE(desc.numSamplers  == 0);
-    REQUIRE(desc.numUniformBuffers  == 0);
-    REQUIRE(desc.numStorageBuffers  == 0);
+    REQUIRE(desc.numSamplers == 0);
+    REQUIRE(desc.numUniformBuffers == 0);
+    REQUIRE(desc.numStorageBuffers == 0);
     REQUIRE(desc.numStorageTextures == 0);
 }
 
 TEST_CASE("BufferUsage bitfield OR", "[rhi]") {
     BufferUsage combined = BufferUsage::Vertex | BufferUsage::Index;
-    uint32_t raw = static_cast<uint32_t>(combined);
+    uint32_t raw         = static_cast<uint32_t>(combined);
     REQUIRE(raw & static_cast<uint32_t>(BufferUsage::Vertex));
     REQUIRE(raw & static_cast<uint32_t>(BufferUsage::Index));
     REQUIRE(!(raw & static_cast<uint32_t>(BufferUsage::Uniform)));
@@ -39,11 +40,11 @@ TEST_CASE("BufferUsage bitfield OR", "[rhi]") {
 
 TEST_CASE("PipelineDesc defaults", "[rhi]") {
     PipelineDesc desc{};
-    REQUIRE(desc.hasDepth   == true);
-    REQUIRE(desc.depthTest  == true);
+    REQUIRE(desc.hasDepth == true);
+    REQUIRE(desc.depthTest == true);
     REQUIRE(desc.depthWrite == true);
-    REQUIRE(desc.cullMode   == CullMode::Back);
-    REQUIRE(desc.fillMode   == FillMode::Solid);
-    REQUIRE(desc.topology   == PrimitiveTopology::TriangleList);
+    REQUIRE(desc.cullMode == CullMode::Back);
+    REQUIRE(desc.fillMode == FillMode::Solid);
+    REQUIRE(desc.topology == PrimitiveTopology::TriangleList);
     REQUIRE(desc.depthCompare == CompareOp::Less);
 }
