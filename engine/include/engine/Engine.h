@@ -1,8 +1,9 @@
 #pragma once
 
+#include "rhi/IRHIDevice.h"
 #include <SDL3/SDL.h>
-#include <SDL3/SDL_gpu.h>
 #include <string_view>
+#include <memory>
 
 namespace ds {
 
@@ -22,14 +23,16 @@ public:
 
     void run();
 
+    rhi::IRHIDevice& device() { return *m_device; }
+
 private:
     void processEvents();
     void update();
     void render();
 
-    SDL_Window*    m_window  = nullptr;
-    SDL_GPUDevice* m_device  = nullptr;
-    bool           m_running = false;
+    SDL_Window*                      m_window  = nullptr;
+    std::unique_ptr<rhi::IRHIDevice> m_device;
+    bool                             m_running = false;
 };
 
 } // namespace ds

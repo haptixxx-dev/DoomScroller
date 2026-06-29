@@ -1,5 +1,6 @@
 add_library(engine STATIC
     src/Engine.cpp
+    src/rhi/sdl3/SDL3Device.cpp
 )
 
 target_include_directories(engine
