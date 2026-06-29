@@ -27,6 +27,15 @@ std::filesystem::path assets() {
 
 std::filesystem::path shaders() {
 #ifdef DS_DEV
+    // Compiled bytecode lives in the binary dir, not source dir
+    return std::filesystem::path(DS_BINARY_DIR) / "shaders";
+#else
+    return g_binDir / "shaders";
+#endif
+}
+
+std::filesystem::path shaderSources() {
+#ifdef DS_DEV
     return std::filesystem::path(DS_SOURCE_DIR) / "shaders";
 #else
     return g_binDir / "shaders";

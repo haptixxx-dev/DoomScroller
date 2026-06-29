@@ -48,6 +48,7 @@ public:
     // Capabilities
     // -----------------------------------------------------------------------
     virtual const RHICaps& caps() const = 0;
+    virtual TextureFormat  swapchainFormat() const = 0;
 
     // -----------------------------------------------------------------------
     // Native handle escape hatch for extended features (mesh shaders, etc.)

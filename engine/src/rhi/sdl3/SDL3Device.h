@@ -93,6 +93,7 @@ public:
                                 uint64_t size, uint32_t mipLevel) override;
 
     const RHICaps& caps() const override { return m_caps; }
+    TextureFormat  swapchainFormat() const override;
 
     void* nativeDevice() const override { return m_gpu; }
 

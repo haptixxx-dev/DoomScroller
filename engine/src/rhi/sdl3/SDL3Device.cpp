@@ -174,11 +174,10 @@ RHIShader SDL3Device::createShader(const ShaderDesc& desc) {
     info.stage         = desc.stage == ShaderStage::Vertex
                          ? SDL_GPU_SHADERSTAGE_VERTEX
                          : SDL_GPU_SHADERSTAGE_FRAGMENT;
-    // sampler/uniform counts set to sane defaults; update when pipeline is built
-    info.num_samplers          = 8;
-    info.num_uniform_buffers   = 4;
-    info.num_storage_buffers   = 0;
-    info.num_storage_textures  = 0;
+    info.num_samplers         = desc.numSamplers;
+    info.num_uniform_buffers  = desc.numUniformBuffers;
+    info.num_storage_buffers  = desc.numStorageBuffers;
+    info.num_storage_textures = desc.numStorageTextures;
 
     SDL_GPUShader* shader = SDL_CreateGPUShader(m_gpu, &info);
     sdlCheck(shader != nullptr, "SDL_CreateGPUShader");
@@ -287,6 +286,15 @@ RHIPipeline SDL3Device::createPipeline(const PipelineDesc& desc) {
     RHIPipeline handle;
     handle.ptr = pipeline;
     return handle;
+}
+
+TextureFormat SDL3Device::swapchainFormat() const {
+    SDL_GPUTextureFormat fmt = SDL_GetGPUSwapchainTextureFormat(m_gpu, m_window);
+    switch (fmt) {
+        case SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM: return TextureFormat::BGRA8Unorm;
+        case SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM: return TextureFormat::RGBA8Unorm;
+        default:                                    return TextureFormat::BGRA8Unorm;
+    }
 }
 
 void SDL3Device::destroyPipeline(RHIPipeline pipeline) {

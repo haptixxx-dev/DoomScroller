@@ -41,15 +41,18 @@ rhi::RHIShader ShaderLoader::load(rhi::IRHIDevice& device,
     std::streamsize size = file.tellg();
     file.seekg(0, std::ios::beg);
 
-    std::vector<char> buf(size);
+    // MSL is null-terminated text; SPIRV/DXIL are binary
+    bool isMSL = (m_format == rhi::ShaderFormat::MSL);
+    std::vector<char> buf(isMSL ? size + 1 : size);
     if (!file.read(buf.data(), size))
         throw std::runtime_error("ShaderLoader: read failed " + path.string());
+    if (isMSL) buf[size] = '\0';
 
     rhi::ShaderDesc desc{};
     desc.stage        = stage;
     desc.format       = m_format;
     desc.bytecode     = buf.data();
-    desc.bytecodeSize = static_cast<size_t>(size);
+    desc.bytecodeSize = static_cast<size_t>(isMSL ? size + 1 : size);
     desc.entryPoint   = stage == rhi::ShaderStage::Vertex ? "vertMain" : "fragMain";
 
     return device.createShader(desc);

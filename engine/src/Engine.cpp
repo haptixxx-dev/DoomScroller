@@ -1,6 +1,9 @@
 #include "engine/Engine.h"
 #include "engine/Profiler.h"
+#include "engine/Paths.h"
+#include "engine/ShaderLoader.h"
 #include "rhi/sdl3/SDL3Device.h"
+#include <SDL3/SDL_gpu.h>
 #include <stdexcept>
 
 namespace ds {
@@ -15,12 +18,40 @@ Engine::Engine(const EngineConfig& cfg) {
 
     m_device  = rhi::createDevice(m_window);
     m_running = true;
+
+    initTriangle();
 }
 
 Engine::~Engine() {
+    if (m_trianglePipeline.valid()) m_device->destroyPipeline(m_trianglePipeline);
+    if (m_triangleVS.valid())       m_device->destroyShader(m_triangleVS);
+    if (m_triangleFS.valid())       m_device->destroyShader(m_triangleFS);
     m_device.reset();
     if (m_window) SDL_DestroyWindow(m_window);
     SDL_Quit();
+}
+
+void Engine::initTriangle() {
+    ShaderLoader loader(
+        static_cast<SDL_GPUDevice*>(m_device->nativeDevice()),
+        paths::shaders()
+    );
+    m_triangleVS = loader.load(*m_device, "triangle", rhi::ShaderStage::Vertex);
+    m_triangleFS = loader.load(*m_device, "triangle", rhi::ShaderStage::Fragment);
+
+    rhi::ColorTargetDesc colorTarget{};
+    colorTarget.format = m_device->swapchainFormat();
+
+    rhi::PipelineDesc pipeDesc{};
+    pipeDesc.vertexShader   = m_triangleVS;
+    pipeDesc.fragmentShader = m_triangleFS;
+    pipeDesc.colorTargets   = { &colorTarget, 1 };
+    pipeDesc.hasDepth       = false;
+    pipeDesc.depthTest      = false;
+    pipeDesc.depthWrite     = false;
+    pipeDesc.cullMode       = rhi::CullMode::None;
+
+    m_trianglePipeline = m_device->createPipeline(pipeDesc);
 }
 
 void Engine::run() {
@@ -62,6 +93,8 @@ void Engine::render() {
     pass.colorAttachments = { &color, 1 };
 
     cmd->beginRenderPass(pass);
+    cmd->setPipeline(m_trianglePipeline);
+    cmd->draw(3, 1, 0, 0);
     cmd->endRenderPass();
 
     m_device->submitFrame(cmd);

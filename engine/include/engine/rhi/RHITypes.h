@@ -117,6 +117,10 @@ struct ShaderDesc {
     const void*  bytecode   = nullptr;
     size_t       bytecodeSize = 0;
     const char*  entryPoint = "main";
+    uint32_t     numSamplers       = 0;
+    uint32_t     numUniformBuffers = 0;
+    uint32_t     numStorageBuffers = 0;
+    uint32_t     numStorageTextures = 0;
 };
 
 struct VertexAttribute {

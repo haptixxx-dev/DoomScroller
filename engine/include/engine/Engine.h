@@ -29,10 +29,15 @@ private:
     void processEvents();
     void update();
     void render();
+    void initTriangle();
 
-    SDL_Window*                      m_window  = nullptr;
+    SDL_Window*                      m_window           = nullptr;
     std::unique_ptr<rhi::IRHIDevice> m_device;
-    bool                             m_running = false;
+    bool                             m_running          = false;
+
+    rhi::RHIShader                   m_triangleVS       = {};
+    rhi::RHIShader                   m_triangleFS       = {};
+    rhi::RHIPipeline                 m_trianglePipeline = {};
 };
 
 } // namespace ds
