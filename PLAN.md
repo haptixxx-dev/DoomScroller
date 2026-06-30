@@ -221,12 +221,16 @@ screenshot-diff harness turns every later render change into a regression test.
 | 56 | **BC7 encoder** | 55 | A real BC7 compressor behind the `.dstex` cook seam (replaces the RGBA8 stub), gated on `RHICaps`; `TextureManager` BCn upload path exercised |
 | 57 | **Mesh-shader pipeline path** | 55 | The Enhanced-tier `VK_EXT_mesh_shader` / Metal mesh-shader path via `nativeDevice()`, tier-gated; the "why a custom engine" payoff |
 | 58 | **Bindless materials + GPU compute depth** | 55, 57 | Bindless material/texture arrays; fix the one-frame GPU-particle position lead; expand GPU compute usage (culling / sim) on the Enhanced tier |
+| 59 | **Real lighting overhaul** | 55, 57 | Cube/array texture RHI support, true multi-light shadow-casting (not just the nearest one), cascaded sun shadows, PCF/PCSS soft shadows, and a path off forward-16-lights toward clustered/deferred — see task detail below |
 
 Recommended execution order: **A (46-48) -> CI half of B (49) -> D (51-54) ->
-C (55-58)**, with packaging (50) near the end once there are real cooked assets
-and a validated render to ship. Wave A makes everything else verifiable; the CI
-half of B keeps it green; D ships player-facing value cheaply (mostly tested
-logic/data) while real hardware is lined up for C + task 48.
+C (55-58) -> 59**, with packaging (50) near the end once there are real cooked
+assets and a validated render to ship. Wave A makes everything else verifiable;
+the CI half of B keeps it green; D ships player-facing value cheaply (mostly
+tested logic/data) while real hardware is lined up for C + task 48. Task 59 is
+deliberately last in C: it needs the RHI capability work from 55/57 (cube/array
+textures are exactly the kind of capability-gated feature that work establishes
+the pattern for) and is the highest-risk, most GPU-bound item on the list.
 
 #### Phase 4 task detail
 
@@ -306,6 +310,37 @@ logic/data) while real hardware is lined up for C + task 48.
 - Bindless material/texture arrays to cut per-draw binding
 - Fix the one-frame GPU-particle position lead from task 39
 - Expand GPU compute usage (e.g. culling / simulation) on the Enhanced tier
+
+#### Task 59 - Real lighting overhaul
+The lighting model today is solid but deliberately scoped down twice for the
+same reason: the RHI has no cube-map or texture-array support (`TextureDesc`
+has no type field; `SDL3Device` hardcodes every texture to 2D;
+`RenderPassDesc` has no layer/face/mip fields — confirmed by reading the RHI,
+not assumed). This task removes that ceiling.
+- **RHI cube/array texture support**: add a texture type/layer-count to
+  `TextureDesc`, layer/face targeting to `RenderPassDesc`, and backend support
+  in `SDL3Device` (the prerequisite every item below builds on)
+- **True multi-light shadows**: today exactly ONE point light shadow-casts per
+  frame (whichever is nearest the camera; see `ShadowMatrix.h`'s
+  `pointShadowFaceMatrix` + the distance-based 6-face workaround in
+  `mesh.slang`/`Engine.cpp`), chosen specifically to avoid needing cube/array
+  textures. With real cube-map support, shadow-cast every light within some
+  budget (indexed into a texture array) instead of just the nearest one
+- **Cascaded sun shadows**: the single-cascade ortho frustum is now sized to
+  the actual loaded level's AABB (`m_levelBounds`, fixed this session so large
+  multi-room levels don't read "fullbright"), but one cascade spread over a
+  big level loses per-texel resolution near the camera. Split into 2-4
+  cascades (near/far) so close-up shadows stay sharp regardless of level size
+- **Soft shadows**: PCF kernel widening / PCSS for the sun, multi-tap for
+  point lights (today's `samplePointShadow` is a single, unfiltered tap),
+  plus normal-offset bias to cut peter-panning/acne without per-surface tuning
+- **Beyond forward-16**: `kMaxForwardLights` (16) and the CPU-side gather in
+  `updateLights()` cap simultaneous lights; investigate clustered or tiled
+  deferred lighting if level/encounter design wants more than ~16 lights live
+  at once (multi-room procedural levels already each carry their own light,
+  so this ceiling is reachable sooner than the original single-arena design
+  assumed)
+- Stretch: light probes / baked or screen-space GI, SSAO, IES-style area lights
 
 ### Phase 3 (tasks 21-45)
 
