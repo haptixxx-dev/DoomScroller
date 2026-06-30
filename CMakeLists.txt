@@ -111,6 +111,7 @@ ds_compile_slang(
               ${CMAKE_SOURCE_DIR}/shaders/ui.slang
               ${CMAKE_SOURCE_DIR}/shaders/tonemap.slang
               ${CMAKE_SOURCE_DIR}/shaders/shadow_depth.slang
+              ${CMAKE_SOURCE_DIR}/shaders/point_shadow_depth.slang
               ${CMAKE_SOURCE_DIR}/shaders/post.slang
               ${CMAKE_SOURCE_DIR}/shaders/blur.slang
     STAGES    vertex fragment
