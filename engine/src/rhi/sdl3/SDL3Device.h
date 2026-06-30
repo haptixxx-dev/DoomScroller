@@ -45,6 +45,9 @@ class SDL3CommandList final : public IRHICommandList {
     void drawIndexed(uint32_t indexCount, uint32_t instanceCount, uint32_t firstIndex, int32_t vertexOffset,
                      uint32_t firstInstance) override;
 
+    void dispatchCompute(RHIComputePipeline pipeline, RHIBuffer readWrite, RHIBuffer readOnly, const void* uniformData,
+                         uint32_t uniformSize, uint32_t gx, uint32_t gy, uint32_t gz) override;
+
     void uploadBuffer(RHIBuffer dst, const void* data, uint64_t size, uint64_t dstOffset) override;
     void uploadTexture(RHITexture dst, const void* data, uint64_t size, uint32_t mipLevel, uint32_t layer) override;
     void copyBuffer(RHIBuffer dst, uint64_t dstOffset, RHIBuffer src, uint64_t srcOffset, uint64_t size) override;
@@ -70,12 +73,14 @@ class SDL3Device final : public IRHIDevice {
     RHISampler createSampler(const SamplerDesc& desc) override;
     RHIShader createShader(const ShaderDesc& desc) override;
     RHIPipeline createPipeline(const PipelineDesc& desc) override;
+    RHIComputePipeline createComputePipeline(const ComputePipelineDesc& desc) override;
 
     void destroyBuffer(RHIBuffer buffer) override;
     void destroyTexture(RHITexture texture) override;
     void destroySampler(RHISampler sampler) override;
     void destroyShader(RHIShader shader) override;
     void destroyPipeline(RHIPipeline pipeline) override;
+    void destroyComputePipeline(RHIComputePipeline pipeline) override;
 
     IRHICommandList* beginFrame() override;
     void submitFrame(IRHICommandList* cmd) override;

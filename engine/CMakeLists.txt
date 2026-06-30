@@ -17,6 +17,7 @@ add_library(engine_math STATIC
     src/Camera.cpp
     src/ParticleSystem.cpp
     src/WaveSystem.cpp
+    src/ShaderWatcher.cpp
 )
 target_include_directories(engine_math PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
@@ -30,6 +31,7 @@ add_library(engine STATIC
     src/Camera.cpp
     src/Paths.cpp
     src/ShaderLoader.cpp
+    src/ShaderWatcher.cpp
     src/TextureManager.cpp
     src/MeshLoader.cpp
     src/PhysicsWorld.cpp

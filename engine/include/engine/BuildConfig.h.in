@@ -11,4 +11,9 @@
 #ifdef DS_DEV
 #define DS_SOURCE_DIR "@CMAKE_SOURCE_DIR@"
 #define DS_BINARY_DIR "@CMAKE_BINARY_DIR@"
+// Absolute path to the slangc binary and the primary shader target format,
+// used by ShaderWatcher to recompile .slang sources at runtime (mirrors the
+// build-time ds_compile_slang invocation). DS_DEV only.
+#define DS_SLANG_COMPILER "@SLANG_COMPILER@"
+#define DS_SHADER_TARGET "@DS_PRIMARY_SHADER_TARGET@"
 #endif

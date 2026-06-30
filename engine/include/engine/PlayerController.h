@@ -4,6 +4,7 @@
 #include "engine/MovementTech.h"
 #include "engine/PhysicsWorld.h"
 
+#include <algorithm>
 #include <glm/glm.hpp>
 
 namespace ds {
@@ -23,6 +24,10 @@ class PlayerController {
     void update(Camera& camera, glm::vec3 moveDir, bool jump, bool dashPressed, bool crouchHeld, float dt);
 
     glm::vec3 eyePosition() const;
+
+    // Restore up to `count` dash charges (clamped to the configured max). Used
+    // by the parry's dash-refund reward (task 35).
+    void refundDash(int count) { m_dashCharges = std::min(tuning.dashMaxCharges, m_dashCharges + count); }
 
     // --- Movement tech state (read-only accessors for HUD / hooks) ---------
     int dashCharges() const { return m_dashCharges; }

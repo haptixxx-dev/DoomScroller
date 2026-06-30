@@ -48,6 +48,33 @@ class IRHICommandList {
                              int32_t vertexOffset = 0, uint32_t firstInstance = 0) = 0;
 
     // -----------------------------------------------------------------------
+    // Compute (task 39)
+    //
+    // dispatchCompute encapsulates a whole compute pass: it binds `pipeline`
+    // and the supplied read-write + read-only storage buffers, pushes the small
+    // uniform blob (compute uniform slot 0), and issues SDL_DispatchGPUCompute
+    // for (gx,gy,gz) workgroups. Designed for the GPU particle sim: one RW
+    // storage buffer (instances) + one RO storage buffer (particle state) +
+    // a uniform with dt/gravity/count.
+    //
+    // MUST be called OUTSIDE any render pass (SDL3 forbids nesting passes). The
+    // base implementation is a no-op so non-compute backends/stubs link; the
+    // SDL3 backend overrides it.
+    // -----------------------------------------------------------------------
+    virtual void dispatchCompute(RHIComputePipeline pipeline, RHIBuffer readWrite, RHIBuffer readOnly,
+                                 const void* uniformData, uint32_t uniformSize, uint32_t gx, uint32_t gy = 1,
+                                 uint32_t gz = 1) {
+        (void)pipeline;
+        (void)readWrite;
+        (void)readOnly;
+        (void)uniformData;
+        (void)uniformSize;
+        (void)gx;
+        (void)gy;
+        (void)gz;
+    }
+
+    // -----------------------------------------------------------------------
     // Data upload (outside render pass — copy pass in SDL3/Vulkan terms)
     // -----------------------------------------------------------------------
     virtual void uploadBuffer(RHIBuffer dst, const void* data, uint64_t size, uint64_t dstOffset = 0)            = 0;

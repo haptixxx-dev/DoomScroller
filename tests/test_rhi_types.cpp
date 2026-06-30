@@ -1,6 +1,7 @@
 #include "engine/rhi/RHITypes.h"
 
 #include <catch2/catch_test_macros.hpp>
+#include <string>
 
 using namespace ds::rhi;
 
@@ -36,6 +37,35 @@ TEST_CASE("BufferUsage bitfield OR", "[rhi]") {
     REQUIRE(raw & static_cast<uint32_t>(BufferUsage::Vertex));
     REQUIRE(raw & static_cast<uint32_t>(BufferUsage::Index));
     REQUIRE(!(raw & static_cast<uint32_t>(BufferUsage::Uniform)));
+}
+
+TEST_CASE("StorageWrite is a distinct bit and ORs cleanly with Vertex", "[rhi]") {
+    // The GPU particle instance buffer is created as Vertex | StorageWrite so it
+    // can be both a compute-write target and a vertex buffer (task 39).
+    BufferUsage combined = BufferUsage::Vertex | BufferUsage::StorageWrite;
+    uint32_t raw         = static_cast<uint32_t>(combined);
+    REQUIRE(raw & static_cast<uint32_t>(BufferUsage::Vertex));
+    REQUIRE(raw & static_cast<uint32_t>(BufferUsage::StorageWrite));
+    REQUIRE(!(raw & static_cast<uint32_t>(BufferUsage::Storage)));
+    // StorageWrite and Storage (read) are separate bits.
+    REQUIRE(static_cast<uint32_t>(BufferUsage::StorageWrite) != static_cast<uint32_t>(BufferUsage::Storage));
+}
+
+TEST_CASE("ComputePipelineDesc defaults", "[rhi]") {
+    ComputePipelineDesc desc{};
+    REQUIRE(desc.format == ShaderFormat::SPIRV);
+    REQUIRE(desc.bytecode == nullptr);
+    REQUIRE(desc.bytecodeSize == 0);
+    REQUIRE(std::string(desc.entryPoint) == "compMain");
+    REQUIRE(desc.numReadOnlyStorageBufs == 0);
+    REQUIRE(desc.numReadWriteStorageBufs == 0);
+    REQUIRE(desc.numUniformBuffers == 0);
+    REQUIRE(desc.threadCountX == 64);
+    REQUIRE(desc.threadCountY == 1);
+    REQUIRE(desc.threadCountZ == 1);
+
+    RHIComputePipeline pipe{};
+    REQUIRE(!pipe.valid());
 }
 
 TEST_CASE("PipelineDesc defaults", "[rhi]") {

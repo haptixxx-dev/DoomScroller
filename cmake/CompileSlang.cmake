@@ -68,7 +68,11 @@ function(ds_compile_slang)
 
     # Custom target that builds all shader outputs.
     # Sanitize path into valid CMake target name (colons/slashes illegal on Windows).
-    string(REGEX REPLACE "[^a-zA-Z0-9_]" "_" _tgt_name "shaders_${ARG_OUT_DIR}")
+    # Include the stage list so multiple invocations sharing one OUT_DIR (e.g. a
+    # vertex/fragment batch + a separate compute batch) produce distinct target
+    # names instead of colliding.
+    string(REPLACE ";" "_" _stage_tag "${ARG_STAGES}")
+    string(REGEX REPLACE "[^a-zA-Z0-9_]" "_" _tgt_name "shaders_${_stage_tag}_${ARG_OUT_DIR}")
     add_custom_target("${_tgt_name}" ALL DEPENDS ${_all_outputs})
 
     # Export output list and directory for callers

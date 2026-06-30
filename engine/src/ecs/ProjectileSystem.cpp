@@ -32,9 +32,12 @@ void projectileSystem(entt::registry& world, PhysicsWorld& physics, float dt, co
             glm::vec3 hitPoint{0.f};
             uint32_t hitId = physics.castRay(start, dir, dist, proj.ownerBodyId, hitPoint);
             if (hitId != UINT32_MAX) {
-                detonate        = true;
-                impact.position = hitPoint;
-                impact.normal   = -dir;
+                detonate            = true;
+                impact.position     = hitPoint;
+                impact.normal       = -dir;
+                impact.hitBodyId    = hitId;
+                impact.ownerBodyId  = proj.ownerBodyId;
+                impact.directDamage = proj.damage;
 
                 // Direct hit: find the enemy bound to the struck body, if any.
                 auto enemies = world.view<EnemyComponent, Transform>();
@@ -42,6 +45,7 @@ void projectileSystem(entt::registry& world, PhysicsWorld& physics, float dt, co
                     if (enemy.physicsBodyId == hitId) {
                         enemy.health -= proj.damage;
                         impact.hitEnemy = true;
+                        impact.enemyHits.push_back(ProjectileEnemyHit{et.position, proj.damage, enemy.health <= 0});
                         break;
                     }
                 }
@@ -55,8 +59,10 @@ void projectileSystem(entt::registry& world, PhysicsWorld& physics, float dt, co
                             continue;
                         float d   = glm::length(et.position - impact.position);
                         int extra = splashDamage(proj.damage, d, proj.splashRadius);
-                        if (extra > 0)
+                        if (extra > 0) {
                             enemy.health -= extra;
+                            impact.enemyHits.push_back(ProjectileEnemyHit{et.position, extra, enemy.health <= 0});
+                        }
                     }
                 }
             }

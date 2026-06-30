@@ -20,6 +20,14 @@ class IRHIDevice {
     virtual RHIShader createShader(const ShaderDesc& desc)       = 0;
     virtual RHIPipeline createPipeline(const PipelineDesc& desc) = 0;
 
+    // Compute pipeline (task 39). Default-implemented to return an invalid
+    // handle so backends without compute support (or stubs) still compile; the
+    // SDL3 backend overrides it. A caller MUST check valid() before dispatching.
+    virtual RHIComputePipeline createComputePipeline(const ComputePipelineDesc& desc) {
+        (void)desc;
+        return {};
+    }
+
     // -----------------------------------------------------------------------
     // Resource destruction
     // -----------------------------------------------------------------------
@@ -28,6 +36,7 @@ class IRHIDevice {
     virtual void destroySampler(RHISampler sampler)    = 0;
     virtual void destroyShader(RHIShader shader)       = 0;
     virtual void destroyPipeline(RHIPipeline pipeline) = 0;
+    virtual void destroyComputePipeline(RHIComputePipeline pipeline) { (void)pipeline; }
 
     // -----------------------------------------------------------------------
     // Frame lifecycle

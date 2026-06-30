@@ -43,4 +43,12 @@ std::filesystem::path shaderSources() {
 #endif
 }
 
+std::filesystem::path userDir() {
+#ifdef DS_DEV
+    return std::filesystem::path(DS_BINARY_DIR) / "user";
+#else
+    return g_binDir / "user";
+#endif
+}
+
 } // namespace ds::paths

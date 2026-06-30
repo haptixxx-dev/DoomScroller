@@ -32,6 +32,28 @@ SDL3Device::SDL3Device(SDL_Window* window) : m_window(window) {
     m_caps.maxTextureDim     = 16384;
     m_caps.maxPushConstBytes = 128;
 
+    // Best-effort capability population (task 34). SDL3 GPU deliberately exposes
+    // a small, portable surface: it has NO query for mesh shaders, bindless, or
+    // device VRAM. So we derive the two feature flags QualityProfile::selectTier
+    // reads (meshShaders / bindless) from the shader format the driver chose, and
+    // leave deviceVRAMBytes at 0 ("unknown"). selectTier treats 0 VRAM
+    // conservatively as Minimum, so an unknown VRAM never over-promises.
+    //
+    // Heuristic: a DXIL-capable backend is the modern D3D12 path, and an MSL
+    // backend is Metal on Apple Silicon / recent Macs — both ship on hardware
+    // that comfortably clears the "Enhanced" bar (mesh shaders + bindless-style
+    // descriptor indexing) in practice. The Vulkan/SPIR-V path covers everything
+    // from a GTX 1060 up, so we cannot assume Enhanced from SPIR-V alone and
+    // leave the flags false there (Minimum unless a future VRAM query says
+    // otherwise). This is intentionally conservative; correctness of the render
+    // path does not depend on the tier, only its cost.
+    const SDL_GPUShaderFormat fmts = SDL_GetGPUShaderFormats(m_gpu);
+    if ((fmts & SDL_GPU_SHADERFORMAT_DXIL) != 0u || (fmts & SDL_GPU_SHADERFORMAT_MSL) != 0u) {
+        m_caps.meshShaders = true;
+        m_caps.bindless    = true;
+    }
+    m_caps.deviceVRAMBytes = 0; // SDL3 GPU exposes no VRAM query; 0 == unknown.
+
     m_frameCmd = new SDL3CommandList(m_gpu, m_window);
 }
 
@@ -54,6 +76,8 @@ RHIBuffer SDL3Device::createBuffer(const BufferDesc& desc) {
         usage |= SDL_GPU_BUFFERUSAGE_INDEX;
     if (static_cast<uint32_t>(desc.usage) & static_cast<uint32_t>(BufferUsage::Storage))
         usage |= SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ;
+    if (static_cast<uint32_t>(desc.usage) & static_cast<uint32_t>(BufferUsage::StorageWrite))
+        usage |= SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_WRITE;
 
     SDL_GPUBufferCreateInfo info{};
     info.usage = usage;
@@ -106,6 +130,11 @@ RHITexture SDL3Device::createTexture(const TextureDesc& desc) {
     SDL_GPUTextureUsageFlags usage = 0;
     if (desc.isDepthStencil) {
         usage = SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET;
+        // A depth texture flagged as a render target additionally wants the
+        // SAMPLER bit so it can be read in a later pass (e.g. the shadow map
+        // sampled by the mesh shader).
+        if (desc.isRenderTarget)
+            usage |= SDL_GPU_TEXTUREUSAGE_SAMPLER;
     } else {
         usage = SDL_GPU_TEXTUREUSAGE_SAMPLER;
         if (desc.isRenderTarget)
@@ -267,6 +296,46 @@ SDL_GPUVertexElementFormat SDL3Device::toSDLVertexFormat(const VertexAttribute& 
     }
 }
 
+static SDL_GPUBlendFactor toSDLBlendFactor(BlendFactor f) {
+    switch (f) {
+    case BlendFactor::Zero:
+        return SDL_GPU_BLENDFACTOR_ZERO;
+    case BlendFactor::One:
+        return SDL_GPU_BLENDFACTOR_ONE;
+    case BlendFactor::SrcColor:
+        return SDL_GPU_BLENDFACTOR_SRC_COLOR;
+    case BlendFactor::OneMinusSrcColor:
+        return SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_COLOR;
+    case BlendFactor::SrcAlpha:
+        return SDL_GPU_BLENDFACTOR_SRC_ALPHA;
+    case BlendFactor::OneMinusSrcAlpha:
+        return SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+    case BlendFactor::DstAlpha:
+        return SDL_GPU_BLENDFACTOR_DST_ALPHA;
+    case BlendFactor::OneMinusDstAlpha:
+        return SDL_GPU_BLENDFACTOR_ONE_MINUS_DST_ALPHA;
+    default:
+        return SDL_GPU_BLENDFACTOR_ONE;
+    }
+}
+
+static SDL_GPUBlendOp toSDLBlendOp(BlendOp op) {
+    switch (op) {
+    case BlendOp::Add:
+        return SDL_GPU_BLENDOP_ADD;
+    case BlendOp::Subtract:
+        return SDL_GPU_BLENDOP_SUBTRACT;
+    case BlendOp::ReverseSubtract:
+        return SDL_GPU_BLENDOP_REVERSE_SUBTRACT;
+    case BlendOp::Min:
+        return SDL_GPU_BLENDOP_MIN;
+    case BlendOp::Max:
+        return SDL_GPU_BLENDOP_MAX;
+    default:
+        return SDL_GPU_BLENDOP_ADD;
+    }
+}
+
 RHIPipeline SDL3Device::createPipeline(const PipelineDesc& desc) {
     // Vertex attributes
     std::vector<SDL_GPUVertexAttribute> attrs;
@@ -296,8 +365,13 @@ RHIPipeline SDL3Device::createPipeline(const PipelineDesc& desc) {
         SDL_GPUColorTargetDescription sdlColor{};
         sdlColor.format = toSDLFormat(c.format);
         if (c.blend.blendEnabled) {
-            sdlColor.blend_state.enable_blend = true;
-            // blend factors mapping omitted for brevity — extend as needed
+            sdlColor.blend_state.enable_blend          = true;
+            sdlColor.blend_state.color_blend_op        = toSDLBlendOp(c.blend.colorOp);
+            sdlColor.blend_state.alpha_blend_op        = toSDLBlendOp(c.blend.alphaOp);
+            sdlColor.blend_state.src_color_blendfactor = toSDLBlendFactor(c.blend.srcColor);
+            sdlColor.blend_state.dst_color_blendfactor = toSDLBlendFactor(c.blend.dstColor);
+            sdlColor.blend_state.src_alpha_blendfactor = toSDLBlendFactor(c.blend.srcAlpha);
+            sdlColor.blend_state.dst_alpha_blendfactor = toSDLBlendFactor(c.blend.dstAlpha);
         }
         colorDescs.push_back(sdlColor);
     }
@@ -371,6 +445,54 @@ TextureFormat SDL3Device::swapchainFormat() const {
 void SDL3Device::destroyPipeline(RHIPipeline pipeline) {
     if (pipeline.valid())
         SDL_ReleaseGPUGraphicsPipeline(m_gpu, static_cast<SDL_GPUGraphicsPipeline*>(pipeline.ptr));
+}
+
+// ---------------------------------------------------------------------------
+// Compute pipeline (task 39)
+// ---------------------------------------------------------------------------
+RHIComputePipeline SDL3Device::createComputePipeline(const ComputePipelineDesc& desc) {
+    SDL_GPUShaderFormat sdlFmt = SDL_GPU_SHADERFORMAT_SPIRV;
+    switch (desc.format) {
+    case ShaderFormat::SPIRV:
+        sdlFmt = SDL_GPU_SHADERFORMAT_SPIRV;
+        break;
+    case ShaderFormat::MSL:
+        sdlFmt = SDL_GPU_SHADERFORMAT_MSL;
+        break;
+    case ShaderFormat::DXIL:
+        sdlFmt = SDL_GPU_SHADERFORMAT_DXIL;
+        break;
+    }
+
+    SDL_GPUComputePipelineCreateInfo info{};
+    info.code                          = static_cast<const uint8_t*>(desc.bytecode);
+    info.code_size                     = desc.bytecodeSize;
+    info.entrypoint                    = desc.entryPoint;
+    info.format                        = sdlFmt;
+    info.num_readonly_storage_buffers  = desc.numReadOnlyStorageBufs;
+    info.num_readwrite_storage_buffers = desc.numReadWriteStorageBufs;
+    info.num_uniform_buffers           = desc.numUniformBuffers;
+    info.threadcount_x                 = desc.threadCountX;
+    info.threadcount_y                 = desc.threadCountY;
+    info.threadcount_z                 = desc.threadCountZ;
+
+    SDL_GPUComputePipeline* pipeline = SDL_CreateGPUComputePipeline(m_gpu, &info);
+    // Non-fatal: a backend without compute (or a missing shader) leaves the
+    // handle invalid; the caller checks valid() and keeps the CPU fallback.
+    if (!pipeline) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_GPU, "SDL_CreateGPUComputePipeline failed: %s", SDL_GetError());
+        return {};
+    }
+    (void)desc.debugName; // SDL3 GPU exposes no compute-pipeline naming entry point.
+
+    RHIComputePipeline handle;
+    handle.ptr = pipeline;
+    return handle;
+}
+
+void SDL3Device::destroyComputePipeline(RHIComputePipeline pipeline) {
+    if (pipeline.valid())
+        SDL_ReleaseGPUComputePipeline(m_gpu, static_cast<SDL_GPUComputePipeline*>(pipeline.ptr));
 }
 
 // ---------------------------------------------------------------------------
@@ -651,6 +773,37 @@ void SDL3CommandList::uploadBuffer(RHIBuffer, const void*, uint64_t, uint64_t) {
 
 void SDL3CommandList::uploadTexture(RHITexture, const void*, uint64_t, uint32_t, uint32_t) {
     // Same as above — use uploadImmediateTexture.
+}
+
+void SDL3CommandList::dispatchCompute(RHIComputePipeline pipeline, RHIBuffer readWrite, RHIBuffer readOnly,
+                                      const void* uniformData, uint32_t uniformSize, uint32_t gx, uint32_t gy,
+                                      uint32_t gz) {
+    if (!pipeline.valid() || !readWrite.valid() || !m_cmd)
+        return;
+
+    // The read-write storage buffer is bound through BeginGPUComputePass; any
+    // read-only storage buffers are bound afterwards on the pass.
+    SDL_GPUStorageBufferReadWriteBinding rwBinding{};
+    rwBinding.buffer = static_cast<SDL_GPUBuffer*>(readWrite.ptr);
+    rwBinding.cycle  = false;
+
+    SDL_GPUComputePass* pass = SDL_BeginGPUComputePass(m_cmd, nullptr, 0, &rwBinding, 1);
+    if (!pass)
+        return;
+
+    SDL_BindGPUComputePipeline(pass, static_cast<SDL_GPUComputePipeline*>(pipeline.ptr));
+
+    if (readOnly.valid()) {
+        SDL_GPUBuffer* roBuf = static_cast<SDL_GPUBuffer*>(readOnly.ptr);
+        SDL_BindGPUComputeStorageBuffers(pass, 0, &roBuf, 1);
+    }
+
+    // Compute uniform slot 0 (matches the shader's cbuffer binding).
+    if (uniformData && uniformSize > 0)
+        SDL_PushGPUComputeUniformData(m_cmd, 0, uniformData, uniformSize);
+
+    SDL_DispatchGPUCompute(pass, gx, gy, gz);
+    SDL_EndGPUComputePass(pass);
 }
 
 void SDL3CommandList::copyBuffer(RHIBuffer dst, uint64_t dstOffset, RHIBuffer src, uint64_t srcOffset, uint64_t size) {
