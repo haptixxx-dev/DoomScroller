@@ -54,17 +54,27 @@ def param_names(raw_params: str):
 
 
 def emit_file_doc(out, doc_lines):
-    if not doc_lines:
-        return
-    out.append("/**")
+    # The bare "@file" command (first line) is what tells Doxygen to treat
+    # this whole synthetic translation unit as a documented file -- without
+    # it, EXTRACT_ALL=NO silently drops the file (and every global function
+    # in it) from the generated docs entirely, even though each function has
+    # its own doc comment.
+    out.append("/** @file")
     for line in doc_lines:
         out.append(f" * {line}")
     out.append(" */")
     out.append("")
 
 
-def emit_function(out, dotted_name, params, doc_lines):
+def group_title(group: str) -> str:
+    if group == "ds_hooks":
+        return "ds hook callbacks (assets/scripts/hooks.lua)"
+    return group.replace("_", ".", 1)
+
+
+def emit_function(out, groups_used, dotted_name, params, doc_lines):
     group = module_group(dotted_name)
+    groups_used.add(group)
     flat_name = dotted_name.replace(".", "_")
     documented_params = {
         re.match(r"@param\s+(\S+)", line.strip()).group(1)
@@ -100,6 +110,7 @@ def main():
         "typedef void* LuaValue;",
         "",
     ]
+    groups_used = set()
 
     pending_doc = []
     pending_is_api_doc = False
@@ -119,7 +130,7 @@ def main():
                 header += " " + lines[i].strip()
             m = re.match(r"^function\s+([A-Za-z_][A-Za-z0-9_.]*)\s*\(([\s\S]*?)\)", header)
             if m and pending_is_api_doc:
-                emit_function(out, m.group(1), param_names(m.group(2)), pending_doc)
+                emit_function(out, groups_used, m.group(1), param_names(m.group(2)), pending_doc)
             elif not file_doc_emitted and pending_is_api_doc:
                 # A "--- @file" block not directly above a function (the
                 # common case: it's the first thing in the file) documents
@@ -149,6 +160,13 @@ def main():
         pending_doc = []
         pending_is_api_doc = False
         i += 1
+
+    # @ingroup needs a matching @defgroup somewhere in the processed input
+    # (Doxygen resolves these across files in a separate pass, so defining it
+    # here -- in the same file that's about to use it -- is sufficient even
+    # though other .lua files reference their own distinct groups).
+    defgroups = [f'/** @defgroup {g} "{group_title(g)}" */' for g in sorted(groups_used)]
+    out = out[:4] + defgroups + [""] + out[4:]
 
     sys.stdout.write("\n".join(out) + "\n")
 

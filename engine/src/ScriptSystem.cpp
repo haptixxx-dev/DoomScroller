@@ -33,14 +33,18 @@ ScriptSystem* selfFromState(lua_State* L) {
 }
 
 // --- ds.* binding trampolines ------------------------------------------------
+// Every l_* function below is a real C trampoline with a single C++ parameter
+// (lua_State* L); the actual Lua-level arguments are read off the Lua stack
+// by hand inside the body (luaL_check*/checkUserdata calls), not passed as
+// C++ parameters. Each one's Doxygen comment therefore documents the Lua-
+// level call signature in prose rather than with @param/@return, which
+// Doxygen would otherwise (correctly) flag as not matching the real
+// single-`lua_State*` signature.
 
-/** ds.spawn_enemy(x, y, z [, type]) -> entity id
- *  Spawns an enemy entity at world position (x, y, z).
- *  @param x world-space spawn position x
- *  @param y world-space spawn position y
- *  @param z world-space spawn position z
- *  @param type optional archetype hint (0=Grunt 1=Charger 2=Ranged), default 0
- *  @return integer the spawned entity's id
+/** `ds.spawn_enemy(x, y, z [, type]) -> entity id`
+ *  Spawns an enemy entity at world position (x, y, z). `type` is an optional
+ *  archetype hint (0=Grunt 1=Charger 2=Ranged), default 0. Returns the
+ *  spawned entity's id.
  */
 int l_spawn_enemy(lua_State* L) {
     ScriptSystem* self = selfFromState(L);
@@ -55,11 +59,9 @@ int l_spawn_enemy(lua_State* L) {
     return 1;
 }
 
-/** ds.get_field(entity, field) -> number
- *  Reads a numeric field off an entity (e.g. health, ammo) by name.
- *  @param entity entity id
- *  @param field field name to read
- *  @return number the field's current value (0 if the entity/field is missing)
+/** `ds.get_field(entity, field) -> number`
+ *  Reads a numeric field off an entity (e.g. health, ammo) by name. Returns
+ *  the field's current value (0 if the entity/field is missing).
  */
 int l_get_field(lua_State* L) {
     ScriptSystem* self = selfFromState(L);
@@ -72,11 +74,8 @@ int l_get_field(lua_State* L) {
     return 1;
 }
 
-/** ds.set_field(entity, field, value)
+/** `ds.set_field(entity, field, value)`
  *  Writes a numeric field on an entity by name.
- *  @param entity entity id
- *  @param field field name to write
- *  @param value new value
  */
 int l_set_field(lua_State* L) {
     ScriptSystem* self = selfFromState(L);
@@ -88,10 +87,8 @@ int l_set_field(lua_State* L) {
     return 0;
 }
 
-/** ds.emit_event(name [, value])
- *  Fires a named gameplay event with an optional numeric payload.
- *  @param name event name
- *  @param value optional numeric payload, default 0
+/** `ds.emit_event(name [, value])`
+ *  Fires a named gameplay event with an optional numeric payload (default 0).
  */
 int l_emit_event(lua_State* L) {
     ScriptSystem* self = selfFromState(L);
@@ -102,12 +99,10 @@ int l_emit_event(lua_State* L) {
     return 0;
 }
 
-/** ds.spawn_projectile(origin, velocity, damage, owner_body_id) — spawns an
- *  enemy/boss-owned projectile entity (used by boss.lua's attack patterns).
- *  @param origin ds.Vec3 world-space spawn position
- *  @param velocity ds.Vec3 initial velocity
- *  @param damage damage the projectile deals on hit
- *  @param owner_body_id firing entity's physics body id (so it can't hit itself)
+/** `ds.spawn_projectile(origin, velocity, damage, owner_body_id)`
+ *  Spawns an enemy/boss-owned projectile entity (used by boss.lua's attack
+ *  patterns). `origin`/`velocity` are ds.Vec3; `owner_body_id` is the firing
+ *  entity's physics body id (so it can't hit itself).
  */
 int l_spawn_projectile(lua_State* L) {
     ScriptSystem* self   = selfFromState(L);
@@ -120,13 +115,11 @@ int l_spawn_projectile(lua_State* L) {
     return 0;
 }
 
-/** ds.level.add_box(center, half_extents, color) — accumulates a box into the
- *  level-gen LevelData (engine/LevelGen.h). Silently no-ops outside a
- *  level-gen run, since Callbacks::levelAddBox is unset on the main gameplay
- *  ScriptSystem.
- *  @param center ds.Vec3 world-space box center
- *  @param half_extents ds.Vec3 half-size along each axis
- *  @param color ds.Vec3 vertex tint (rgb, 0..1)
+/** `ds.level.add_box(center, half_extents, color)`
+ *  Accumulates a box (all three args ds.Vec3; `color` is an rgb 0..1 vertex
+ *  tint) into the level-gen LevelData (engine/LevelGen.h). Silently no-ops
+ *  outside a level-gen run, since Callbacks::levelAddBox is unset on the
+ *  main gameplay ScriptSystem.
  */
 int l_level_add_box(lua_State* L) {
     ScriptSystem* self = selfFromState(L);
@@ -138,14 +131,13 @@ int l_level_add_box(lua_State* L) {
     return 0;
 }
 
-/** ds.level.add_mesh(path, position [, euler_degrees]) — places a glTF mesh
- *  piece with real collision (see GltfExtract.h) at runtime. euler_degrees is
- *  an optional Vec3 of Euler angles in degrees (ergonomic for level authors,
- *  who think in degrees, not quaternions); converted here so the C++
- *  callback stays in proper glm::quat form.
- *  @param path glTF file path, relative to the assets directory
- *  @param position ds.Vec3 world-space placement
- *  @param euler_degrees optional ds.Vec3 rotation in degrees, default (0,0,0)
+/** `ds.level.add_mesh(path, position [, euler_degrees])`
+ *  Places a glTF mesh piece (`path`, relative to the assets directory) with
+ *  real collision (see GltfExtract.h) at runtime, at world position
+ *  `position` (ds.Vec3). `euler_degrees` is an optional ds.Vec3 of Euler
+ *  angles in degrees (ergonomic for level authors, who think in degrees, not
+ *  quaternions; default (0,0,0)) — converted here so the C++ callback stays
+ *  in proper glm::quat form.
  */
 int l_level_add_mesh(lua_State* L) {
     ScriptSystem* self = selfFromState(L);
@@ -159,14 +151,12 @@ int l_level_add_mesh(lua_State* L) {
     return 0;
 }
 
-/** ds.level.add_spawn(position, is_player [, archetype]) — registers a spawn
- *  point: the player start (is_player true) or an enemy spawn (is_player
- *  false). archetype is an optional int (0=Grunt, 1=Charger, 2=Ranged)
- *  hinting which enemy type this spawn should favor; omit (or nil) for the
- *  engine's default wave/index-based selection. Ignored when is_player is true.
- *  @param position ds.Vec3 world-space spawn position
- *  @param is_player true for the player start, false for an enemy spawn
- *  @param archetype optional enemy archetype hint (0=Grunt 1=Charger 2=Ranged)
+/** `ds.level.add_spawn(position, is_player [, archetype])`
+ *  Registers a spawn point at `position` (ds.Vec3): the player start
+ *  (`is_player` true) or an enemy spawn (`is_player` false). `archetype` is
+ *  an optional int (0=Grunt, 1=Charger, 2=Ranged) hinting which enemy type
+ *  this spawn should favor; omit (or nil) for the engine's default
+ *  wave/index-based selection. Ignored when `is_player` is true.
  */
 int l_level_add_spawn(lua_State* L) {
     ScriptSystem* self = selfFromState(L);
@@ -178,12 +168,10 @@ int l_level_add_spawn(lua_State* L) {
     return 0;
 }
 
-/** ds.level.add_light(position, color, radius, intensity) — places a point
- *  light entity in the generated level.
- *  @param position ds.Vec3 world-space light position
- *  @param color ds.Vec3 light color (rgb, 0..1)
- *  @param radius falloff radius in world units
- *  @param intensity scalar brightness
+/** `ds.level.add_light(position, color, radius, intensity)`
+ *  Places a point light entity in the generated level. `position`/`color`
+ *  are ds.Vec3 (`color` an rgb 0..1 tint); `radius` is the falloff radius in
+ *  world units; `intensity` is a scalar brightness.
  */
 int l_level_add_light(lua_State* L) {
     ScriptSystem* self = selfFromState(L);

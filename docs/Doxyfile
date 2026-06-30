@@ -45,14 +45,24 @@ EXTENSION_MAPPING       = lua=C++
 EXTRACT_ALL             = NO
 EXTRACT_PRIVATE         = NO
 EXTRACT_STATIC          = YES
+# ScriptSystem.cpp's l_* Lua trampolines (ds.spawn_enemy, ds.level.add_box,
+# etc.) live inside an anonymous namespace; without this they're hidden
+# entirely regardless of EXTRACT_ALL/documentation.
+EXTRACT_ANON_NSPACES    = YES
 HIDE_UNDOC_MEMBERS      = YES
 HIDE_UNDOC_CLASSES      = YES
 
 # --- Warnings: catch doc/signature mismatches, stay quiet on the rest -------
+# WARN_NO_PARAMDOC is off: ScriptSystem.cpp's l_* trampolines all take a
+# single `lua_State* L` in real C++, but their @param tags intentionally
+# document the LUA-level call signature (e.g. ds.spawn_enemy(x, y, z, type))
+# instead, which Doxygen still renders correctly -- it just can't match those
+# names against the C++ signature, so this warning class is permanently and
+# expectedly noisy for this file specifically.
 WARNINGS                = YES
 WARN_IF_UNDOCUMENTED    = NO
 WARN_IF_DOC_ERROR       = YES
-WARN_NO_PARAMDOC        = YES
+WARN_NO_PARAMDOC        = NO
 
 # --- Output -------------------------------------------------------------------
 GENERATE_HTML           = YES

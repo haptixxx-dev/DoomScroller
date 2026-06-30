@@ -4,12 +4,12 @@
 #include <new>
 
 /** Generic Lua userdata/metatable glue. A type T gets Lua-side userdata
- *  support by specializing UserdataTraits<T> (just a registry metatable name)
- *  and calling registerType() once with a TypeSpec of C-function metamethods/
- *  methods. push/check/test<T> are then reusable by any binding code that
- *  needs to move T in and out of the Lua stack. ds.Vec3 (LuaVec3.h) is the
- *  first consumer; future userdata types (Vec2, Quat, an entity handle)
- *  follow the same pattern.
+ *  support by specializing `UserdataTraits<T>` (just a registry metatable
+ *  name) and calling registerType() once with a TypeSpec of C-function
+ *  metamethods/methods. `pushUserdata`/`checkUserdata`/`testUserdata` are
+ *  then reusable by any binding code that needs to move T in and out of the
+ *  Lua stack. ds.Vec3 (LuaVec3.h) is the first consumer; future userdata
+ *  types (Vec2, Quat, an entity handle) follow the same pattern.
  */
 namespace ds::lua {
 
