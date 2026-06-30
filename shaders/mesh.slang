@@ -38,12 +38,10 @@ struct LightData {
 [vk::binding(0, 1)]
 ConstantBuffer<PushConstants> gPush : register(b0);
 
-// Fragment texture+sampler slot 0: SPIRV set=2 binding=0, MSL texture(0)/sampler(0)
+// Fragment texture+sampler slot 0: SPIRV set=2 binding=0 as combined image sampler.
+// Sampler2D emits OpTypeSampledImage, which matches SDL_GPU's COMBINED_IMAGE_SAMPLER layout.
 [vk::binding(0, 2)]
-Texture2D<float4> gAlbedo : register(t0, space2);
-
-[vk::binding(0, 2)]
-SamplerState gSampler : register(s0, space2);
+Sampler2D gAlbedo;
 
 // Fragment uniform slot 0: SDL3 GPU maps fragment uniform buffers to SPIRV
 // set=3 (MSL buffer(0)). Filled via pushFragmentConstants each frame.
@@ -64,7 +62,7 @@ VSOutput vertMain(VSInput v) {
 
 [shader("fragment")]
 float4 fragMain(VSOutput i) : SV_Target {
-    float4 texColor = gAlbedo.Sample(gSampler, i.uv);
+    float4 texColor = gAlbedo.Sample(i.uv);
 
     float3 n = normalize(i.normalWS);
 

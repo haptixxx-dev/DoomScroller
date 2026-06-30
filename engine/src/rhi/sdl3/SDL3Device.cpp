@@ -227,6 +227,31 @@ void SDL3Device::destroyShader(RHIShader shader) {
 // ---------------------------------------------------------------------------
 // Pipeline
 // ---------------------------------------------------------------------------
+static SDL_GPUBlendFactor toSDLBlendFactor(BlendFactor f) {
+    switch (f) {
+    case BlendFactor::Zero:             return SDL_GPU_BLENDFACTOR_ZERO;
+    case BlendFactor::One:              return SDL_GPU_BLENDFACTOR_ONE;
+    case BlendFactor::SrcColor:         return SDL_GPU_BLENDFACTOR_SRC_COLOR;
+    case BlendFactor::OneMinusSrcColor: return SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_COLOR;
+    case BlendFactor::SrcAlpha:         return SDL_GPU_BLENDFACTOR_SRC_ALPHA;
+    case BlendFactor::OneMinusSrcAlpha: return SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+    case BlendFactor::DstAlpha:         return SDL_GPU_BLENDFACTOR_DST_ALPHA;
+    case BlendFactor::OneMinusDstAlpha: return SDL_GPU_BLENDFACTOR_ONE_MINUS_DST_ALPHA;
+    default:                            return SDL_GPU_BLENDFACTOR_ONE;
+    }
+}
+
+static SDL_GPUBlendOp toSDLBlendOp(BlendOp op) {
+    switch (op) {
+    case BlendOp::Add:             return SDL_GPU_BLENDOP_ADD;
+    case BlendOp::Subtract:        return SDL_GPU_BLENDOP_SUBTRACT;
+    case BlendOp::ReverseSubtract: return SDL_GPU_BLENDOP_REVERSE_SUBTRACT;
+    case BlendOp::Min:             return SDL_GPU_BLENDOP_MIN;
+    case BlendOp::Max:             return SDL_GPU_BLENDOP_MAX;
+    default:                       return SDL_GPU_BLENDOP_ADD;
+    }
+}
+
 static SDL_GPUCompareOp toSDLCompareOp(CompareOp op) {
     switch (op) {
     case CompareOp::Never:
@@ -296,8 +321,13 @@ RHIPipeline SDL3Device::createPipeline(const PipelineDesc& desc) {
         SDL_GPUColorTargetDescription sdlColor{};
         sdlColor.format = toSDLFormat(c.format);
         if (c.blend.blendEnabled) {
-            sdlColor.blend_state.enable_blend = true;
-            // blend factors mapping omitted for brevity — extend as needed
+            sdlColor.blend_state.enable_blend          = true;
+            sdlColor.blend_state.src_color_blendfactor = toSDLBlendFactor(c.blend.srcColor);
+            sdlColor.blend_state.dst_color_blendfactor = toSDLBlendFactor(c.blend.dstColor);
+            sdlColor.blend_state.color_blend_op        = toSDLBlendOp(c.blend.colorOp);
+            sdlColor.blend_state.src_alpha_blendfactor = toSDLBlendFactor(c.blend.srcAlpha);
+            sdlColor.blend_state.dst_alpha_blendfactor = toSDLBlendFactor(c.blend.dstAlpha);
+            sdlColor.blend_state.alpha_blend_op        = toSDLBlendOp(c.blend.alphaOp);
         }
         colorDescs.push_back(sdlColor);
     }
