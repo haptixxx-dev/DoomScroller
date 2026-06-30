@@ -495,9 +495,12 @@ class Engine {
     rhi::RHITexture m_enemyAlbedo  = {};
     rhi::RHISampler m_enemySampler = {};
 
-    // Level file to load on startup, relative to ds::paths::assets(). If it is
-    // missing or fails to parse, the engine falls back to the hardcoded arena.
-    static constexpr const char* kStartupLevel = "levels/arena.dslv";
+    // Level loading is a 3-tier fallback chain, relative to ds::paths::assets():
+    // a Lua procedural level script first, then the binary .dslv, then the
+    // hardcoded buildArena(). Each tier only runs if the previous one produced
+    // nothing, so the engine always has playable geometry.
+    static constexpr const char* kLevelGenScript = "scripts/level.lua";
+    static constexpr const char* kStartupLevel   = "levels/arena.dslv";
 
     static constexpr glm::vec3 kPlayerSpawn{0.f, 1.7f, 0.f};
     // Resolved player spawn (task 42): seeded to kPlayerSpawn, then overridden by

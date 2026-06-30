@@ -1,8 +1,11 @@
 #include "engine/Engine.h"
 
+#include "engine/GltfExtract.h"
 #include "engine/HighScore.h"
 #include "engine/InstanceBatch.h"
+#include "engine/LevelGen.h"
 #include "engine/LevelLoader.h"
+#include "engine/MeshLoader.h"
 #include "engine/Paths.h"
 #include "engine/PlayerController.h"
 #include "engine/Profiler.h"
@@ -469,12 +472,46 @@ void Engine::initScene() {
 
     m_camera.yaw = -90.f;
 
-    // Prefer a data-driven level file; fall back to the hardcoded arena when it
-    // is missing so the engine always has playable geometry. The level's
-    // player-start spawn (flags bit0) overrides m_playerSpawn when present
-    // (task 42); otherwise it stays kPlayerSpawn, matching the arena fallback.
-    m_playerSpawn = kPlayerSpawn;
-    if (!loadLevel(kStartupLevel, albedo, m_linearSampler, &m_playerSpawn))
+    // 3-tier level fallback chain: a Lua procedural level script first, then
+    // the binary .dslv, then the hardcoded arena, so the engine always has
+    // playable geometry. The level's player-start spawn (flags bit0 / the
+    // Lua script's ds.level.add_spawn(pos, true)) overrides m_playerSpawn when
+    // present (task 42); otherwise it stays kPlayerSpawn.
+    m_playerSpawn   = kPlayerSpawn;
+    bool levelReady = false;
+
+    LevelData genData;
+    std::vector<LuaMeshPlacement> genMeshes;
+    std::filesystem::path genScriptPath = paths::assets() / kLevelGenScript;
+    if (generateLevelFromLua(genScriptPath, genData, genMeshes)) {
+        LevelLoader::populate(genData, m_world, m_physics, *m_device, albedo, m_linearSampler, &m_playerSpawn);
+
+        // Lua-placed mesh pieces (ds.level.add_mesh) load fresh every run via
+        // the live device, never serialized. Collision needs its own CPU-side
+        // read since MeshLoader::load discards vertex/index data after GPU
+        // upload — a one-time startup cost, not a hot path.
+        for (const auto& mp : genMeshes) {
+            std::vector<MeshComponent> parts             = MeshLoader::load(*m_device, mp.path);
+            std::vector<gltf::ExtractedPrimitive> cpuGeo = gltf::extractTrianglePrimitives(mp.path);
+            for (size_t i = 0; i < parts.size() && i < cpuGeo.size(); ++i) {
+                auto e = m_world.create();
+                Transform t{};
+                t.position = mp.position;
+                t.rotation = mp.rotation;
+                m_world.emplace<Transform>(e, t);
+                m_world.emplace<MeshComponent>(e, parts[i]);
+                m_world.emplace<MaterialComponent>(e, MaterialComponent{albedo, m_linearSampler});
+
+                std::vector<glm::vec3> physicsVerts(cpuGeo[i].vertices.size());
+                for (size_t v = 0; v < physicsVerts.size(); ++v)
+                    physicsVerts[v] = cpuGeo[i].vertices[v].pos;
+                m_physics.addStaticMesh(physicsVerts, cpuGeo[i].indices, mp.position, mp.rotation);
+            }
+        }
+        levelReady = true;
+    }
+
+    if (!levelReady && !loadLevel(kStartupLevel, albedo, m_linearSampler, &m_playerSpawn))
         buildArena(albedo, m_linearSampler);
 
     // Camera starts at the resolved player spawn at eye height.
