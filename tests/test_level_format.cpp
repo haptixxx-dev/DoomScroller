@@ -17,6 +17,8 @@ TEST_CASE("Level record sizes match the documented on-disk layout", "[level]") {
     REQUIRE(sizeof(BoxRecord) == 40);
     REQUIRE(sizeof(SpawnPointRecord) == 16);
     REQUIRE(sizeof(LightRecord) == 32);
+    REQUIRE(sizeof(MeshRecordHeader) == 44);
+    REQUIRE(sizeof(Vertex) == 44);
 }
 
 TEST_CASE("Magic spells 'DSLV' little-endian", "[level]") {
@@ -143,4 +145,73 @@ TEST_CASE("Full level body round-trips (header + all record blocks)", "[level]")
     REQUIRE(rl[0].intensity == 0.75f);
 
     std::filesystem::remove(path);
+}
+
+TEST_CASE("MeshRecordHeader round-trips with a variable-length vertex/index payload", "[level]") {
+    auto path = std::filesystem::temp_directory_path() / "ds_level_mesh_roundtrip.dslv";
+
+    MeshRecordHeader mh{};
+    mh.position[0]  = 1.f;
+    mh.position[1]  = 2.f;
+    mh.position[2]  = 3.f;
+    mh.rotation[0]  = 0.f;
+    mh.rotation[1]  = 0.70710678f;
+    mh.rotation[2]  = 0.f;
+    mh.rotation[3]  = 0.70710678f;
+    mh.materialRef  = 9;
+
+    std::vector<Vertex> verts(3);
+    verts[0].pos    = {0.f, 0.f, 0.f};
+    verts[1].pos    = {1.f, 0.f, 0.f};
+    verts[2].pos    = {0.f, 1.f, 0.f};
+    verts[0].normal = {0.f, 0.f, 1.f};
+
+    std::vector<uint32_t> indices{0, 1, 2};
+
+    mh.vertexCount = static_cast<uint32_t>(verts.size());
+    mh.indexCount  = static_cast<uint32_t>(indices.size());
+
+    {
+        std::FILE* f = std::fopen(path.string().c_str(), "wb");
+        REQUIRE(f != nullptr);
+        REQUIRE(std::fwrite(&mh, sizeof(mh), 1, f) == 1);
+        REQUIRE(std::fwrite(verts.data(), sizeof(Vertex), verts.size(), f) == verts.size());
+        REQUIRE(std::fwrite(indices.data(), sizeof(uint32_t), indices.size(), f) == indices.size());
+        std::fclose(f);
+    }
+
+    MeshRecordHeader rmh{};
+    std::vector<Vertex> rv;
+    std::vector<uint32_t> ri;
+    {
+        std::FILE* f = std::fopen(path.string().c_str(), "rb");
+        REQUIRE(f != nullptr);
+        REQUIRE(std::fread(&rmh, sizeof(rmh), 1, f) == 1);
+        rv.resize(rmh.vertexCount);
+        ri.resize(rmh.indexCount);
+        REQUIRE(std::fread(rv.data(), sizeof(Vertex), rmh.vertexCount, f) == rmh.vertexCount);
+        REQUIRE(std::fread(ri.data(), sizeof(uint32_t), rmh.indexCount, f) == rmh.indexCount);
+        std::fclose(f);
+    }
+
+    REQUIRE(rmh.position[0] == 1.f);
+    REQUIRE(rmh.position[1] == 2.f);
+    REQUIRE(rmh.position[2] == 3.f);
+    REQUIRE(rmh.rotation[1] == 0.70710678f);
+    REQUIRE(rmh.rotation[3] == 0.70710678f);
+    REQUIRE(rmh.materialRef == 9);
+    REQUIRE(rmh.vertexCount == 3);
+    REQUIRE(rmh.indexCount == 3);
+
+    REQUIRE(rv[1].pos.x == 1.f);
+    REQUIRE(rv[2].pos.y == 1.f);
+    REQUIRE(rv[0].normal.z == 1.f);
+    REQUIRE(ri[2] == 2u);
+
+    std::filesystem::remove(path);
+}
+
+TEST_CASE("LevelHeader.meshCount defaults to 0 and is the old reserved0 slot", "[level]") {
+    LevelHeader h{};
+    REQUIRE(h.meshCount == 0);
 }

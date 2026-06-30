@@ -2,7 +2,9 @@
 
 #include <cstdint>
 #include <glm/glm.hpp>
+#include <glm/gtc/quaternion.hpp>
 #include <memory>
+#include <vector>
 
 namespace ds {
 
@@ -27,6 +29,14 @@ class PhysicsWorld {
 
     // Add a dynamic (moving) box body with an initial linear velocity. Returns opaque body ID.
     uint32_t addDynamicBox(glm::vec3 center, glm::vec3 halfExtents, glm::vec3 initialVelocity = {});
+
+    // Add a static triangle-mesh body (baked level geometry, e.g. a glTF-
+    // converted or Lua-placed level piece). `vertices`/`indices` are in local
+    // space; `position`/`rotation` place the body in world space. Jolt mesh
+    // shapes are static-only, which matches level geometry's needs exactly.
+    // Returns opaque body ID.
+    uint32_t addStaticMesh(const std::vector<glm::vec3>& vertices, const std::vector<uint32_t>& indices,
+                           glm::vec3 position, glm::quat rotation = glm::quat(1.f, 0.f, 0.f, 0.f));
 
     // Remove and destroy a body from the physics system.
     void removeBody(uint32_t bodyId);
