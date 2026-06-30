@@ -94,6 +94,8 @@ class SDL3Device final : public IRHIDevice {
 
     void* nativeDevice() const override { return m_gpu; }
 
+    void setVSync(bool enabled) override;
+
     // Debug: download an RGBA8/BGRA8 render-target texture to a PPM file.
     void debugDownloadTexture(RHITexture tex, uint32_t w, uint32_t h, const char* path);
 

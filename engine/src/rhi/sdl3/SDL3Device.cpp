@@ -321,46 +321,6 @@ SDL_GPUVertexElementFormat SDL3Device::toSDLVertexFormat(const VertexAttribute& 
     }
 }
 
-static SDL_GPUBlendFactor toSDLBlendFactor(BlendFactor f) {
-    switch (f) {
-    case BlendFactor::Zero:
-        return SDL_GPU_BLENDFACTOR_ZERO;
-    case BlendFactor::One:
-        return SDL_GPU_BLENDFACTOR_ONE;
-    case BlendFactor::SrcColor:
-        return SDL_GPU_BLENDFACTOR_SRC_COLOR;
-    case BlendFactor::OneMinusSrcColor:
-        return SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_COLOR;
-    case BlendFactor::SrcAlpha:
-        return SDL_GPU_BLENDFACTOR_SRC_ALPHA;
-    case BlendFactor::OneMinusSrcAlpha:
-        return SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
-    case BlendFactor::DstAlpha:
-        return SDL_GPU_BLENDFACTOR_DST_ALPHA;
-    case BlendFactor::OneMinusDstAlpha:
-        return SDL_GPU_BLENDFACTOR_ONE_MINUS_DST_ALPHA;
-    default:
-        return SDL_GPU_BLENDFACTOR_ONE;
-    }
-}
-
-static SDL_GPUBlendOp toSDLBlendOp(BlendOp op) {
-    switch (op) {
-    case BlendOp::Add:
-        return SDL_GPU_BLENDOP_ADD;
-    case BlendOp::Subtract:
-        return SDL_GPU_BLENDOP_SUBTRACT;
-    case BlendOp::ReverseSubtract:
-        return SDL_GPU_BLENDOP_REVERSE_SUBTRACT;
-    case BlendOp::Min:
-        return SDL_GPU_BLENDOP_MIN;
-    case BlendOp::Max:
-        return SDL_GPU_BLENDOP_MAX;
-    default:
-        return SDL_GPU_BLENDOP_ADD;
-    }
-}
-
 RHIPipeline SDL3Device::createPipeline(const PipelineDesc& desc) {
     // Vertex attributes
     std::vector<SDL_GPUVertexAttribute> attrs;
@@ -453,6 +413,13 @@ RHIPipeline SDL3Device::createPipeline(const PipelineDesc& desc) {
     RHIPipeline handle;
     handle.ptr = pipeline;
     return handle;
+}
+
+void SDL3Device::setVSync(bool enabled) {
+    SDL_GPUPresentMode mode = enabled ? SDL_GPU_PRESENTMODE_VSYNC : SDL_GPU_PRESENTMODE_IMMEDIATE;
+    if (!SDL_WindowSupportsGPUPresentMode(m_gpu, m_window, mode))
+        return; // mode not supported; leave current setting unchanged
+    SDL_SetGPUSwapchainParameters(m_gpu, m_window, SDL_GPU_SWAPCHAINCOMPOSITION_SDR, mode);
 }
 
 TextureFormat SDL3Device::swapchainFormat() const {

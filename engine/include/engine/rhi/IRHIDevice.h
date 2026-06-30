@@ -66,6 +66,10 @@ class IRHIDevice {
     virtual void* nativeDevice() const { return nullptr; }
     virtual void* nativeQueue() const { return nullptr; }
     virtual void* nativeInstance() const { return nullptr; }
+
+    // Apply vsync setting to the swapchain. No-op on backends that don't
+    // support runtime changes (e.g. headless stubs).
+    virtual void setVSync(bool enabled) { (void)enabled; }
 };
 
 // Factory — returns backend based on platform / caps at runtime

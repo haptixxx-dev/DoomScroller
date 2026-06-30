@@ -189,6 +189,8 @@ Engine::Engine(const EngineConfig& cfg) : m_windowWidth(cfg.width), m_windowHeig
     // applied here (no runtime resize path yet) — they round-trip on disk only.
     m_settings               = loadSettings(paths::userDir()).value_or(GameSettings{});
     m_camera.lookSensitivity = m_settings.lookSensitivity;
+    m_device->setVSync(m_settings.vsync);
+    SDL_SetWindowFullscreen(m_window, m_settings.fullscreen);
 
     // Audio is non-fatal: if the device fails to open, AudioSystem becomes a
     // silent no-op and the rest of the engine is unaffected. Apply the persisted
@@ -1694,6 +1696,12 @@ void Engine::processEvents() {
         case SDL_EVENT_QUIT:
             m_running = false;
             break;
+        case SDL_EVENT_WINDOW_RESIZED:
+            // Covers fullscreen enter/exit and any manual resize. Update the
+            // logical dimensions so UI layout and mouse hit-tests stay in sync
+            // with the actual window coordinate space.
+            SDL_GetWindowSize(m_window, &m_windowWidth, &m_windowHeight);
+            break;
         case SDL_EVENT_KEY_DOWN:
             if (e.key.key == SDLK_ESCAPE) {
                 // Settings open (over Menu): ESC closes the panel back to the
@@ -1804,6 +1812,8 @@ void Engine::update() {
     m_dt               = realDt * hitstopScale;
 
     m_timeAccum += realDt;
+    float instantFps = realDt > 0.f ? 1.f / realDt : 0.f;
+    m_smoothFps      = m_smoothFps > 0.f ? m_smoothFps + 0.1f * (instantFps - m_smoothFps) : instantFps;
     if (m_damageFlash > 0.f)
         m_damageFlash -= realDt;
     if (m_parryFlash > 0.f)
@@ -2708,14 +2718,13 @@ bool Engine::handleSettingsInput(float mx, float my, bool pressed) {
 }
 
 void Engine::applyAndPersistSettings() {
-    // Live-apply to the audio buses + camera, then persist. Window vsync /
-    // fullscreen are recorded + saved but not applied at runtime (no swapchain
-    // recreate path yet); they take effect on next launch.
     m_audio.setMasterVolume(m_settings.masterVolume);
     m_audio.setSfxVolume(m_settings.sfxVolume);
     m_audio.setMusicVolume(m_settings.musicVolume);
     m_audio.setUiVolume(m_settings.uiVolume);
     m_camera.lookSensitivity = m_settings.lookSensitivity;
+    m_device->setVSync(m_settings.vsync);
+    SDL_SetWindowFullscreen(m_window, m_settings.fullscreen);
     (void)saveSettings(paths::userDir(), m_settings);
 }
 
@@ -3021,6 +3030,13 @@ void Engine::renderHUD(rhi::IRHICommandList* cmd) {
         float scale = 3.f;
         float tw    = m_ui.textWidth(buf, scale);
         m_ui.drawText((w - tw) * 0.5f, h * 0.35f, buf, scale, {0.9f, 0.95f, 1.f, 1.f});
+    }
+
+    // --- FPS counter (top-left, below wave readout). -----------------------
+    {
+        char fpsbuf[16];
+        std::snprintf(fpsbuf, sizeof(fpsbuf), "%.0f FPS", m_smoothFps);
+        m_ui.drawText(24.f, 24.f + 8.f * 2.f + 8.f, fpsbuf, 2.f, {0.6f, 0.6f, 0.6f, 0.8f});
     }
 
     m_ui.flush(*m_device, cmd);

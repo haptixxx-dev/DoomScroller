@@ -529,8 +529,9 @@ class Engine {
     int m_windowWidth  = 1280;
     int m_windowHeight = 720;
 
-    uint64_t m_lastTick = 0;
-    float m_dt          = 0.f;
+    uint64_t m_lastTick  = 0;
+    float m_dt           = 0.f;
+    float m_smoothFps    = 0.f; // EMA-smoothed FPS for the HUD counter
 };
 
 } // namespace ds

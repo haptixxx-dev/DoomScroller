@@ -33,9 +33,9 @@ struct AudioSystem::Impl {
     // set by settings is never lost. Seeded to 1 to match the master default.
     float baseMusicVolume = 1.f;
 
-    // Decoded source sounds, cached by resolved path. Copies are spawned from
-    // these for each one-shot so the file is only decoded once.
-    std::unordered_map<std::string, ma_sound> sources;
+    // Decoded source sounds, cached by resolved path. Heap-allocated so the
+    // address seen by miniaudio's node graph stays stable across map rehashes.
+    std::unordered_map<std::string, std::unique_ptr<ma_sound>> sources;
     // Paths we already failed to load, so we log once and stay quiet after.
     std::unordered_set<std::string> missing;
 
@@ -63,7 +63,7 @@ struct AudioSystem::Impl {
     ma_sound* source(const std::string& path) {
         auto found = sources.find(path);
         if (found != sources.end())
-            return &found->second;
+            return found->second.get();
 
         if (missing.count(path))
             return nullptr;
@@ -76,18 +76,19 @@ struct AudioSystem::Impl {
             return nullptr;
         }
 
-        ma_sound src{};
-        ma_result r =
-            ma_sound_init_from_file(&engine, full.string().c_str(),
-                                    MA_SOUND_FLAG_DECODE | MA_SOUND_FLAG_NO_SPATIALIZATION, nullptr, nullptr, &src);
+        auto ptr    = std::make_unique<ma_sound>();
+        ma_result r = ma_sound_init_from_file(&engine, full.string().c_str(),
+                                              MA_SOUND_FLAG_DECODE | MA_SOUND_FLAG_NO_SPATIALIZATION,
+                                              nullptr, nullptr, ptr.get());
         if (r != MA_SUCCESS) {
             SDL_LogWarn(SDL_LOG_CATEGORY_AUDIO, "AudioSystem: failed to load sound (%d): %s", (int)r,
                         full.string().c_str());
             missing.insert(path);
             return nullptr;
         }
-        auto [iter, ok] = sources.emplace(path, src);
-        return &iter->second;
+        auto raw         = ptr.get();
+        sources[path]    = std::move(ptr);
+        return raw;
     }
 
     // Spawns an owned copy of a cached source. Caller configures + starts it.
@@ -158,7 +159,7 @@ void AudioSystem::shutdown() {
         m_impl->activeVoices.clear();
 
         for (auto& [path, snd] : m_impl->sources)
-            ma_sound_uninit(&snd);
+            ma_sound_uninit(snd.get());
         m_impl->sources.clear();
 
         if (m_impl->groupsReady) {
