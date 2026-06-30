@@ -24,6 +24,7 @@
 #include <cstdio>
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/quaternion.hpp>
 #include <limits>
 #include <stdexcept>
 #include <string>
@@ -104,6 +105,41 @@ static uint8_t makeCheckerboard(uint8_t* out, uint32_t w, uint32_t h) {
         }
     }
     return 0;
+}
+
+// World-space AABB of every BoxRecord + MeshRecord in `data` (the seam shared
+// by the Lua-generated and .dslv level paths — see m_levelBounds's comment in
+// Engine.h for why an accurate bounds here matters: it sizes the sun shadow
+// frustum, and geometry outside it reads as unconditionally lit). Box bounds
+// are exact (center +/- halfExtents); mesh bounds transform each baked vertex
+// by the record's own position/rotation. Falls back to a small default box if
+// `data` has no boxes or meshes at all (degenerate/empty level), so the
+// accumulator never returns an inside-out (min > max) box.
+static ds::Bounds boundsFromLevelData(const LevelData& data) {
+    glm::vec3 mn{std::numeric_limits<float>::max()};
+    glm::vec3 mx{std::numeric_limits<float>::lowest()};
+    auto fold = [&](const glm::vec3& p) {
+        mn = glm::min(mn, p);
+        mx = glm::max(mx, p);
+    };
+    for (const BoxRecord& box : data.boxes) {
+        glm::vec3 center{box.center[0], box.center[1], box.center[2]};
+        glm::vec3 half{box.halfExtents[0], box.halfExtents[1], box.halfExtents[2]};
+        fold(center - half);
+        fold(center + half);
+    }
+    for (const MeshRecord& mesh : data.meshes) {
+        glm::vec3 pos{mesh.header.position[0], mesh.header.position[1], mesh.header.position[2]};
+        // glm::quat's constructor takes (w, x, y, z); the on-disk layout is
+        // (x, y, z, w) — see LevelLoader.cpp's identical reconstruction.
+        glm::quat rot{mesh.header.rotation[3], mesh.header.rotation[0], mesh.header.rotation[1],
+                      mesh.header.rotation[2]};
+        for (const Vertex& v : mesh.vertices)
+            fold(pos + rot * v.pos);
+    }
+    if (mn.x > mx.x)
+        return ds::Bounds{glm::vec3{-10.2f, -0.2f, -10.2f}, glm::vec3{10.2f, 5.2f, 10.2f}};
+    return ds::Bounds{mn, mx};
 }
 
 // Shared mesh vertex layout (task 28). Binding 0 = per-vertex pos/color/uv/normal
@@ -580,6 +616,7 @@ void Engine::initScene() {
     std::filesystem::path genScriptPath = paths::assets() / kLevelGenScript;
     if (generateLevelFromLua(genScriptPath, genData, genMeshes)) {
         LevelLoader::populate(genData, m_world, m_physics, *m_device, albedo, m_linearSampler, &m_playerSpawn);
+        m_levelBounds = boundsFromLevelData(genData);
 
         // Lua-placed mesh pieces (ds.level.add_mesh) load fresh every run via
         // the live device, never serialized. Collision needs its own CPU-side
@@ -598,8 +635,16 @@ void Engine::initScene() {
                 m_world.emplace<MaterialComponent>(e, MaterialComponent{albedo, m_linearSampler});
 
                 std::vector<glm::vec3> physicsVerts(cpuGeo[i].vertices.size());
-                for (size_t v = 0; v < physicsVerts.size(); ++v)
+                for (size_t v = 0; v < physicsVerts.size(); ++v) {
                     physicsVerts[v] = cpuGeo[i].vertices[v].pos;
+                    // Fold this Lua-placed mesh's world-space extent into the
+                    // sun shadow bounds too — boundsFromLevelData only sees
+                    // genData's boxes (ds.level.add_mesh pieces are a separate
+                    // runtime-only path, never baked into a MeshRecord).
+                    glm::vec3 worldPos = mp.position + mp.rotation * physicsVerts[v];
+                    m_levelBounds.min  = glm::min(m_levelBounds.min, worldPos);
+                    m_levelBounds.max  = glm::max(m_levelBounds.max, worldPos);
+                }
                 m_physics.addStaticMesh(physicsVerts, cpuGeo[i].indices, mp.position, mp.rotation);
             }
         }
@@ -1730,6 +1775,10 @@ void Engine::buildArena(rhi::RHITexture albedo, rhi::RHISampler sampler) {
     // Each face: 4 verts, normals face room interior (inward).
     // Indices always 0,1,2,0,2,3. CullMode::None so winding doesn't matter.
     const float W = 10.f, H = 5.f, D = 10.f, T = 0.1f; // half-extents X,Y,Z; T = slab thickness
+    // Sized to this fallback room exactly (rather than relying on
+    // m_levelBounds's matching default) so the sun shadow frustum stays
+    // correct even if these constants ever change.
+    m_levelBounds = ds::Bounds{glm::vec3{-W - T, -T, -D - T}, glm::vec3{W + T, H + T, D + T}};
     const Face faces[] = {
         // Floor (y=0), normal +Y
         {{{{-W, 0, -D}, {1, 1, 1}, {0, D}, {0, 1, 0}},
@@ -1801,7 +1850,16 @@ void Engine::buildArena(rhi::RHITexture albedo, rhi::RHISampler sampler) {
 
 bool Engine::loadLevel(const char* relPath, rhi::RHITexture albedo, rhi::RHISampler sampler, glm::vec3* playerStart) {
     std::filesystem::path full = paths::assets() / relPath;
-    return LevelLoader::load(full, m_world, m_physics, *m_device, albedo, sampler, playerStart);
+    // Read + populate explicitly (rather than the LevelLoader::load
+    // convenience wrapper) so the parsed LevelData is available here to size
+    // m_levelBounds — see boundsFromLevelData's comment on why an accurate
+    // bounds matters for the sun shadow frustum.
+    LevelData data;
+    if (!LevelLoader::read(full, data))
+        return false;
+    LevelLoader::populate(data, m_world, m_physics, *m_device, albedo, sampler, playerStart);
+    m_levelBounds = boundsFromLevelData(data);
+    return true;
 }
 
 void Engine::run() {
@@ -2507,15 +2565,17 @@ void Engine::render() {
     shakeCam.pitch += glm::degrees(m_recoil.offset.y + shake.x);
     glm::mat4 viewProj = shakeCam.projMatrix(aspect) * shakeCam.viewMatrix();
 
-    // Light-space matrix for the sun shadow map, rebuilt each frame. Static
-    // bounds covering the 20x5x20 arena (walls at +-10 in X/Z, floor at y=0,
-    // ceiling ~5) with generous slack so tall casters / spawned geometry stay
-    // inside the ortho frustum. kSunDir is the *toward-the-sun* vector (the L
-    // used in mesh.slang's BRDF, pointing up at +Y); sunLightSpaceMatrix wants
-    // the direction the light TRAVELS, so we negate it to place the shadow
-    // camera above the scene looking down.
-    const ds::Bounds arenaBounds{glm::vec3{-12.f, -2.f, -12.f}, glm::vec3{12.f, 8.f, 12.f}};
-    m_sunLightSpace = ds::sunLightSpaceMatrix(-kSunDir, arenaBounds);
+    // Light-space matrix for the sun shadow map, rebuilt each frame. Uses
+    // m_levelBounds (the actual loaded level's AABB, computed once in
+    // initScene() — see its comment) rather than a fixed box: a multi-room
+    // Lua-generated level can span far more than a single 20x5x20 arena, and
+    // a fragment outside this box is treated as unconditionally lit by
+    // sampleSunShadow's out-of-frustum fallback, which is exactly what reads
+    // as "fullbright" everywhere beyond the box. kSunDir is the *toward-the-
+    // sun* vector (the L used in mesh.slang's BRDF, pointing up at +Y);
+    // sunLightSpaceMatrix wants the direction the light TRAVELS, so we negate
+    // it to place the shadow camera above the scene looking down.
+    m_sunLightSpace = ds::sunLightSpaceMatrix(-kSunDir, m_levelBounds);
 
     // Point-light shadow: pick whichever active light is nearest the camera
     // to shadow-cast this frame (scoped to exactly one caster per frame to

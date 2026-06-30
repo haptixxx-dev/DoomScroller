@@ -12,6 +12,7 @@
 #include "engine/SaveData.h"
 #include "engine/ScriptSystem.h"
 #include "engine/ShaderWatcher.h"
+#include "engine/ShadowMatrix.h"
 #include "engine/StyleMeter.h"
 #include "engine/TextureManager.h"
 #include "engine/UISystem.h"
@@ -545,6 +546,19 @@ class Engine {
     glm::vec3 m_playerSpawn               = kPlayerSpawn;
     static constexpr float kRespawnDelay  = 2.f;
     static constexpr int kPlayerMaxHealth = 100;
+
+    // World-space AABB of whichever level actually loaded (Lua-generated,
+    // .dslv, or the buildArena fallback), computed once in initScene() and
+    // reused every frame to size the sun's orthographic shadow frustum (see
+    // render()'s sunLightSpaceMatrix call). MUST track the real level extent:
+    // the multi-room Lua generator (assets/scripts/level.lua) can span tens
+    // of units in X, and a fragment outside this box gets treated as
+    // unconditionally lit by sampleSunShadow's out-of-frustum fallback — a
+    // stale/undersized box here is exactly what reads as "fullbright" (every
+    // surface beyond the box gets full unshadowed sun regardless of walls or
+    // ceiling). Defaults to buildArena's own known extents so the third-tier
+    // fallback is correct even if initScene's assignment is ever skipped.
+    ds::Bounds m_levelBounds{glm::vec3{-10.2f, -0.2f, -10.2f}, glm::vec3{10.2f, 5.2f, 10.2f}};
 
     // Audio asset paths, relative to ds::paths::assets(). Missing files are
     // logged and skipped by AudioSystem (see assets/sfx/README.md).
