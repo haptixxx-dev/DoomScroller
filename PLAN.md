@@ -147,6 +147,8 @@ Fast-paced 3D FPS. Doom / ULTRAKILL / HyperDemon style. Arena combat, aggressive
 - [x] Wave spawner + game state (`GameState` machine, pure `WaveSystem` score/combo, `HighScore` persistence, wave -> intermission -> next loop, Menu/Dead/Victory overlays, spawn from `SpawnPoint`s)
 - [x] Level format + loader (versioned `DSLV` binary, `LevelLoader` read/write/load into ECS + physics, `tools/level_convert` stub, `arena.dslv`, round-trip tests, `buildArena` fallback)
 - [x] Lua scripting hooks (`ScriptSystem` owns `lua_State`, sandboxed stdlib, manual-bound `ds` table spawn/get/set/emit/wave-config, data-driven enemy stats + wave layout from `waves.lua`, `onWaveStart`/`onEnemyDeath`/`onPlayerDeath` callbacks)
+- [x] Fix: Windows `LNK2038` runtime mismatch (`USE_STATIC_MSVC_RUNTIME_LIBRARY OFF` aligns Jolt's `/MT` to the project-wide dynamic `/MD`; first green Windows build since Jolt was first linked into an exe)
+- [x] CI hygiene: pin to `clang-format` 18 (ubuntu-latest's version), `clang-tidy` narrowing/member-init clean — see `CLAUDE.md` "CI / toolchain gotchas"
 
 ### Next (in order)
 
