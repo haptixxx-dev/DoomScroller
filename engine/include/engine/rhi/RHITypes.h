@@ -19,12 +19,14 @@ struct TextureTag {};
 struct SamplerTag {};
 struct ShaderTag {};
 struct PipelineTag {};
+struct ComputePipelineTag {};
 
-using RHIBuffer   = Handle<BufferTag>;
-using RHITexture  = Handle<TextureTag>;
-using RHISampler  = Handle<SamplerTag>;
-using RHIShader   = Handle<ShaderTag>;
-using RHIPipeline = Handle<PipelineTag>;
+using RHIBuffer          = Handle<BufferTag>;
+using RHITexture         = Handle<TextureTag>;
+using RHISampler         = Handle<SamplerTag>;
+using RHIShader          = Handle<ShaderTag>;
+using RHIPipeline        = Handle<PipelineTag>;
+using RHIComputePipeline = Handle<ComputePipelineTag>;
 
 // ---------------------------------------------------------------------------
 // Enums
@@ -33,7 +35,11 @@ enum class BufferUsage : uint32_t {
     Vertex  = 1 << 0,
     Index   = 1 << 1,
     Uniform = 1 << 2,
-    Storage = 1 << 3,
+    Storage = 1 << 3, // compute storage read
+    // Compute storage write (task 39): a buffer a compute shader writes to. The
+    // GPU particle sim writes its instance buffer here, then it is read back as
+    // a vertex buffer in the same frame (Vertex | StorageWrite).
+    StorageWrite = 1 << 4,
 };
 inline BufferUsage operator|(BufferUsage a, BufferUsage b) {
     return static_cast<BufferUsage>(static_cast<uint32_t>(a) | static_cast<uint32_t>(b));
@@ -167,6 +173,25 @@ struct PipelineDesc {
     bool depthTest             = true;
     bool depthWrite            = true;
     CompareOp depthCompare     = CompareOp::Less;
+};
+
+// Compute pipeline (task 39). Mirrors the resource counts SDL3 needs to bind a
+// compute shader: read-only storage buffers, read-write storage buffers, and
+// (unused for the particle sim) storage textures + uniform buffers. The shader
+// bytecode is supplied directly (entry `compMain`) rather than via an RHIShader
+// because SDL3's compute pipeline create takes its own shader-create info.
+struct ComputePipelineDesc {
+    ShaderFormat format              = ShaderFormat::SPIRV;
+    const void* bytecode             = nullptr;
+    size_t bytecodeSize              = 0;
+    const char* entryPoint           = "compMain";
+    uint32_t numReadOnlyStorageBufs  = 0;
+    uint32_t numReadWriteStorageBufs = 0;
+    uint32_t numUniformBuffers       = 0;
+    uint32_t threadCountX            = 64;
+    uint32_t threadCountY            = 1;
+    uint32_t threadCountZ            = 1;
+    const char* debugName            = nullptr;
 };
 
 struct ColorAttachment {

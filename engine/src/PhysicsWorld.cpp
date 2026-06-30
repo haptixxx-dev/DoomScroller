@@ -173,6 +173,31 @@ uint32_t PhysicsWorld::addCapsule(float halfHeight, float radius, glm::vec3 posi
     return id.GetIndexAndSequenceNumber();
 }
 
+uint32_t PhysicsWorld::addDynamicBox(glm::vec3 center, glm::vec3 halfExtents, glm::vec3 initialVelocity) {
+    JPH::BoxShapeSettings shapeSettings(JPH::Vec3(halfExtents.x, halfExtents.y, halfExtents.z));
+    shapeSettings.SetEmbedded();
+
+    JPH::ShapeRefC shape = shapeSettings.Create().Get();
+
+    JPH::BodyCreationSettings bcs(shape, JPH::RVec3(center.x, center.y, center.z), JPH::Quat::sIdentity(),
+                                  JPH::EMotionType::Dynamic, Layers::MOVING);
+    bcs.mLinearDamping  = 0.1f;
+    bcs.mAngularDamping = 1.0f;
+    bcs.mGravityFactor  = 1.0f;
+
+    JPH::BodyInterface& bi = m_impl->system.GetBodyInterface();
+    JPH::BodyID id         = bi.CreateAndAddBody(bcs, JPH::EActivation::Activate);
+    bi.SetLinearVelocity(id, JPH::Vec3(initialVelocity.x, initialVelocity.y, initialVelocity.z));
+    return id.GetIndexAndSequenceNumber();
+}
+
+void PhysicsWorld::removeBody(uint32_t bodyId) {
+    JPH::BodyInterface& bi = m_impl->system.GetBodyInterface();
+    JPH::BodyID jid        = JPH::BodyID(bodyId);
+    bi.RemoveBody(jid);
+    bi.DestroyBody(jid);
+}
+
 glm::vec3 PhysicsWorld::getPosition(uint32_t bodyId) const {
     JPH::BodyID jid = JPH::BodyID(bodyId);
     JPH::RVec3 pos  = m_impl->system.GetBodyInterface().GetPosition(jid);

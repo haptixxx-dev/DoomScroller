@@ -5,6 +5,8 @@
 
 #include <entt/entt.hpp>
 #include <filesystem>
+#include <glm/glm.hpp>
+#include <optional>
 #include <vector>
 
 namespace ds {
@@ -40,13 +42,19 @@ bool read(const std::filesystem::path& path, LevelData& out);
 // failure.
 bool write(const std::filesystem::path& path, const LevelData& data);
 
-// Load a level file and populate the world: static boxes become render meshes
-// (MeshComponent + MaterialComponent) and physics static bodies; spawn points
-// become SpawnPoint entities. Light records are read but not yet instantiated
-// (reserved for the lighting task). Returns false if the file could not be read,
-// leaving the world untouched in that case.
+// Load a level file and populate the world (task 42):
+//   * static boxes -> render meshes (MeshComponent + MaterialComponent) + a
+//     physics static body each,
+//   * enemy spawn points (flags bit0 == 0) -> SpawnPoint entities,
+//   * each LightRecord -> a LightComponent entity (instantiated; the engine's
+//     updateLights gathers them into the per-frame light buffer),
+//   * the player-start spawn (the FIRST spawn whose flags bit0 is set) is NOT
+//     made an enemy SpawnPoint; instead, when `playerStart` is non-null its
+//     position is written there so the caller can place the player. If the
+//     level has no player-start spawn, *playerStart is left untouched.
+// Returns false if the file could not be read, leaving the world untouched.
 bool load(const std::filesystem::path& path, entt::registry& world, PhysicsWorld& physics, rhi::IRHIDevice& device,
-          rhi::RHITexture albedo, rhi::RHISampler sampler);
+          rhi::RHITexture albedo, rhi::RHISampler sampler, glm::vec3* playerStart = nullptr);
 
 } // namespace LevelLoader
 

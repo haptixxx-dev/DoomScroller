@@ -42,6 +42,22 @@ TEST_CASE("buildInstances splits alpha and additive buckets", "[particles]") {
     REQUIRE(ps.additiveInstances().size() == 7);
 }
 
+TEST_CASE("buildGpuParticles orders alpha bucket before additive", "[particles]") {
+    ParticleSystem ps;
+    ps.emit(ParticleSystem::Effect::BloodBurst, {0.f, 0.f, 0.f}, {0.f, 1.f, 0.f}, 5);  // alpha
+    ps.emit(ParticleSystem::Effect::MuzzleFlash, {0.f, 0.f, 0.f}, {0.f, 0.f, 1.f}, 7); // additive
+    ps.buildGpuParticles();
+
+    // All 12 live particles are snapshotted; the alpha prefix count matches the
+    // alpha bucket so the compute draw can slice [0,alpha)/[alpha,total).
+    REQUIRE(ps.gpuParticles().size() == 12);
+    REQUIRE(ps.gpuAlphaCount() == 5);
+
+    // The prefix is the alpha (BloodBurst, reddish) bucket; every entry alive.
+    for (std::size_t i = 0; i < ps.gpuAlphaCount(); ++i)
+        REQUIRE(ps.gpuParticles()[i].life > 0.f);
+}
+
 TEST_CASE("alpha fades toward zero as a particle ages", "[particles]") {
     ParticleSystem ps;
     ps.emit(ParticleSystem::Effect::BloodBurst, {0.f, 0.f, 0.f}, {0.f, 1.f, 0.f}, 1);

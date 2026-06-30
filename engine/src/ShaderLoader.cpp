@@ -64,4 +64,30 @@ rhi::RHIShader ShaderLoader::load(rhi::IRHIDevice& device, const std::string& na
     return device.createShader(desc);
 }
 
+bool ShaderLoader::loadBytecode(const std::string& name, rhi::ShaderStage stage, std::vector<uint8_t>& outBytes) const {
+    const char* stageStr = stage == rhi::ShaderStage::Vertex     ? "vertex"
+                           : stage == rhi::ShaderStage::Fragment ? "fragment"
+                                                                 : "compute";
+
+    std::filesystem::path path = m_dir / (name + "." + stageStr + "." + m_ext);
+
+    std::ifstream file(path, std::ios::binary | std::ios::ate);
+    if (!file) {
+        outBytes.clear();
+        return false;
+    }
+
+    std::streamsize size = file.tellg();
+    file.seekg(0, std::ios::beg);
+
+    // MSL is null-terminated text; SPIRV/DXIL are binary.
+    bool isMSL = (m_format == rhi::ShaderFormat::MSL);
+    outBytes.assign(static_cast<size_t>(isMSL ? size + 1 : size), 0);
+    if (size > 0 && !file.read(reinterpret_cast<char*>(outBytes.data()), size)) {
+        outBytes.clear();
+        return false;
+    }
+    return true;
+}
+
 } // namespace ds

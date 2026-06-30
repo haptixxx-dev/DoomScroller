@@ -1,6 +1,7 @@
 add_executable(ds_tests
     test_rhi_types.cpp
     test_level_format.cpp
+    test_level_parser.cpp
 )
 target_link_libraries(ds_tests PRIVATE engine_headers Catch2::Catch2WithMain)
 add_test(NAME ds_tests COMMAND ds_tests)
@@ -15,6 +16,28 @@ add_executable(ds_engine_tests
     test_movement.cpp
     test_projectile.cpp
     test_waves.cpp
+    test_frustum.cpp
+    test_gamefeel.cpp
+    test_style.cpp
+    test_settings.cpp
+    test_input.cpp
+    test_save.cpp
+    test_tonemap.cpp
+    test_bloom.cpp
+    test_pbr.cpp
+    test_shadow.cpp
+    test_rendergraph.cpp
+    test_shaderwatcher.cpp
+    test_archetype.cpp
+    test_parry.cpp
+    test_upgrade.cpp
+    test_combat_feedback.cpp
+    test_instancing.cpp
+    test_dstex.cpp
+    test_quality.cpp
+    test_userstorage.cpp
+    test_pickup.cpp
+    test_boss.cpp
 )
 target_link_libraries(ds_engine_tests PRIVATE engine_math engine_headers Catch2::Catch2WithMain)
 add_test(NAME ds_engine_tests COMMAND ds_engine_tests)

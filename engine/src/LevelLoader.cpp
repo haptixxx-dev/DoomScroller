@@ -144,7 +144,8 @@ bool LevelLoader::write(const std::filesystem::path& path, const LevelData& data
 }
 
 bool LevelLoader::load(const std::filesystem::path& path, entt::registry& world, PhysicsWorld& physics,
-                       rhi::IRHIDevice& device, rhi::RHITexture albedo, rhi::RHISampler sampler) {
+                       rhi::IRHIDevice& device, rhi::RHITexture albedo, rhi::RHISampler sampler,
+                       glm::vec3* playerStart) {
     LevelData data;
     if (!read(path, data))
         return false;
@@ -164,13 +165,34 @@ bool LevelLoader::load(const std::filesystem::path& path, entt::registry& world,
         physics.addStaticBox(center, half);
     }
 
+    bool playerStartSeen = false;
     for (const auto& sp : data.spawns) {
+        glm::vec3 pos{sp.position[0], sp.position[1], sp.position[2]};
+        // flags bit0 marks the player start (LevelFormat.h). The FIRST such spawn
+        // positions the player and is NOT registered as an enemy SpawnPoint;
+        // every other spawn becomes an enemy SpawnPoint for wave placement.
+        if ((sp.flags & 0x1u) != 0u && !playerStartSeen) {
+            playerStartSeen = true;
+            if (playerStart != nullptr)
+                *playerStart = pos;
+            continue;
+        }
         auto e = world.create();
-        world.emplace<SpawnPoint>(e, SpawnPoint{glm::vec3{sp.position[0], sp.position[1], sp.position[2]}});
+        world.emplace<SpawnPoint>(e, SpawnPoint{pos});
     }
 
-    // Light records are reserved for the lighting task and intentionally not
-    // instantiated here yet.
+    // Light records (task 42): one LightComponent entity per record. No
+    // Transform is attached, so updateLights() uses the component's own
+    // position (it follows a Transform only when present).
+    for (const auto& lr : data.lights) {
+        auto e = world.create();
+        LightComponent lc{};
+        lc.position  = glm::vec3{lr.position[0], lr.position[1], lr.position[2]};
+        lc.color     = glm::vec3{lr.color[0], lr.color[1], lr.color[2]};
+        lc.radius    = lr.radius;
+        lc.intensity = lr.intensity;
+        world.emplace<LightComponent>(e, lc);
+    }
 
     return true;
 }

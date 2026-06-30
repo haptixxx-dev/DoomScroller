@@ -4,6 +4,7 @@
 
 #include <SDL3/SDL_log.h>
 
+#include <algorithm>
 #include <filesystem>
 #include <miniaudio.h>
 #include <string>
@@ -25,7 +26,12 @@ struct AudioSystem::Impl {
 
     ma_sound_group sfxGroup{};
     ma_sound_group musicGroup{};
+    ma_sound_group uiGroup{};
     bool groupsReady = false;
+
+    // Configured (un-ducked) music volume; duckMusic scales this so the base
+    // set by settings is never lost. Seeded to 1 to match the master default.
+    float baseMusicVolume = 1.f;
 
     // Decoded source sounds, cached by resolved path. Copies are spawned from
     // these for each one-shot so the file is only decoded once.
@@ -125,9 +131,11 @@ bool AudioSystem::init() {
     // Separate buses let SFX and music carry independent volumes.
     bool sfxOk =
         ma_sound_group_init(&m_impl->engine, MA_SOUND_FLAG_NO_SPATIALIZATION, nullptr, &m_impl->sfxGroup) == MA_SUCCESS;
-    bool musicOk        = ma_sound_group_init(&m_impl->engine, MA_SOUND_FLAG_NO_SPATIALIZATION, nullptr,
-                                              &m_impl->musicGroup) == MA_SUCCESS;
-    m_impl->groupsReady = sfxOk && musicOk;
+    bool musicOk = ma_sound_group_init(&m_impl->engine, MA_SOUND_FLAG_NO_SPATIALIZATION, nullptr,
+                                       &m_impl->musicGroup) == MA_SUCCESS;
+    bool uiOk =
+        ma_sound_group_init(&m_impl->engine, MA_SOUND_FLAG_NO_SPATIALIZATION, nullptr, &m_impl->uiGroup) == MA_SUCCESS;
+    m_impl->groupsReady = sfxOk && musicOk && uiOk;
     if (!m_impl->groupsReady)
         SDL_LogWarn(SDL_LOG_CATEGORY_AUDIO, "AudioSystem: sound group init failed; using master bus");
 
@@ -156,6 +164,7 @@ void AudioSystem::shutdown() {
         if (m_impl->groupsReady) {
             ma_sound_group_uninit(&m_impl->sfxGroup);
             ma_sound_group_uninit(&m_impl->musicGroup);
+            ma_sound_group_uninit(&m_impl->uiGroup);
         }
         ma_engine_uninit(&m_impl->engine);
     }
@@ -173,6 +182,20 @@ void AudioSystem::play(const std::string& path) {
     if (!src)
         return;
     ma_sound_group* group = m_impl->groupsReady ? &m_impl->sfxGroup : nullptr;
+    ma_sound* voice       = m_impl->spawnVoice(src, group, false);
+    if (voice)
+        ma_sound_start(voice);
+}
+
+void AudioSystem::playUI(const std::string& path) {
+    if (!initialized())
+        return;
+    ma_sound* src = m_impl->source(path);
+    if (!src)
+        return;
+    // UI cues route through the dedicated UI bus when groups are available so
+    // their volume is independent of SFX; otherwise fall back to the SFX bus.
+    ma_sound_group* group = m_impl->groupsReady ? &m_impl->uiGroup : nullptr;
     ma_sound* voice       = m_impl->spawnVoice(src, group, false);
     if (voice)
         ma_sound_start(voice);
@@ -236,22 +259,42 @@ void AudioSystem::setListener(const glm::vec3& position, const glm::vec3& forwar
     ma_engine_listener_set_direction(&m_impl->engine, 0, forward.x, forward.y, forward.z);
 }
 
+// All bus volumes are 0..1 multipliers. Clamp here at the boundary so a corrupt
+// or hand-edited settings.cfg (e.g. a negative or >1 volume) can never reach
+// miniaudio as a phase-inverting or grossly clipping gain.
 void AudioSystem::setMasterVolume(float volume) {
     if (!initialized())
         return;
-    ma_engine_set_volume(&m_impl->engine, volume);
+    ma_engine_set_volume(&m_impl->engine, std::clamp(volume, 0.f, 1.f));
 }
 
 void AudioSystem::setSfxVolume(float volume) {
     if (!initialized() || !m_impl->groupsReady)
         return;
-    ma_sound_group_set_volume(&m_impl->sfxGroup, volume);
+    ma_sound_group_set_volume(&m_impl->sfxGroup, std::clamp(volume, 0.f, 1.f));
 }
 
 void AudioSystem::setMusicVolume(float volume) {
+    if (!initialized())
+        return;
+    // Remember the configured base so duckMusic can scale relative to it.
+    m_impl->baseMusicVolume = std::clamp(volume, 0.f, 1.f);
+    if (m_impl->groupsReady)
+        ma_sound_group_set_volume(&m_impl->musicGroup, m_impl->baseMusicVolume);
+}
+
+void AudioSystem::setUiVolume(float volume) {
     if (!initialized() || !m_impl->groupsReady)
         return;
-    ma_sound_group_set_volume(&m_impl->musicGroup, volume);
+    ma_sound_group_set_volume(&m_impl->uiGroup, std::clamp(volume, 0.f, 1.f));
+}
+
+void AudioSystem::duckMusic(float factor) {
+    if (!initialized() || !m_impl->groupsReady)
+        return;
+    // baseMusicVolume is already clamped; clamp the duck factor too so the
+    // product stays a sane attenuation.
+    ma_sound_group_set_volume(&m_impl->musicGroup, m_impl->baseMusicVolume * std::clamp(factor, 0.f, 1.f));
 }
 
 } // namespace ds

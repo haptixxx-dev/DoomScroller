@@ -155,6 +155,28 @@ Fast-paced 3D FPS. Doom / ULTRAKILL / HyperDemon style. Arena combat, aggressive
 Phase 2 (tasks 11-20) is **done** - two-way combat, audio/UI/VFX feedback, movement
 tech, projectiles, waves/state, level format, and Lua hooks all landed green.
 
+Phase 3 (tasks 21-45) is **done** - HDR/tonemap, render-graph, hot-reload, frustum
+cull, game-feel (shake/recoil/hitstop), bloom, PBR, instancing, damage numbers,
+enemy archetypes, sun shadows, style meter, pickups, RHICaps tier profile, parry,
+ragdoll/gibs, alt-fire/upgrades, settings store + userDir, GPU compute particles,
+boss, rebindable input map, text level parser, BC7 .dstex cook tool, settings menu
++ audio buses, and the SaveData blob all landed green (build + ctest, 34 test files).
+
+**Verification ceiling note:** this machine has no GPU/window, so every rendering
+feature (21, 22, 26, 27, 31, 28-instancing, 39-compute) is verified by build +
+slangc shader-compile + tested CPU math references + adversarial code review, NOT
+by running the binary. A first run on real hardware must visually confirm: HDR/ACES
+brightness, PBR look, shadow orientation/bias, bloom intensity, instanced draws,
+and the Enhanced-tier compute particle path. Five real bugs were caught by
+adversarial verification and fixed during the build (SDL3 blend-factor INVALID,
+shadow sun-direction inversion, hot-reload partial-failure handle leak, per-spawn
+mesh-buffer leak, unclamped audio volumes). Known follow-ups: real `deviceVRAMBytes`
+query in RHICaps (currently 0 → Vulkan/Linux runs the Minimum tier), a real BC7
+encoder behind the `.dstex` cook seam (emits RGBA8 today), and the one-frame
+GPU-particle position lead on the Enhanced tier.
+
+See git history / `CLAUDE.md` for the per-task detail; the table below is retained
+as the design record.
 Phase 3 (tasks 21-45) is **done** (see PR / branch `feat/phase3-vertical-slice`) -
 multi-pass renderer (HDR/tonemap, render-graph, hot-reload, bloom, PBR, sun
 shadows), frustum culling, game feel (shake/recoil/hitstop), instancing, damage

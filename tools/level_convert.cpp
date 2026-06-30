@@ -1,19 +1,23 @@
 // level_convert — offline converter that emits a binary .dslv level file.
 //
-// This is a minimal stub: it has no parser yet and simply emits the hardcoded
-// DoomScroller arena (the same 20x5x20 room buildArena() generates plus the
-// existing enemy spawn corners and a placeholder light) to the output path.
+// Usage:
+//   level_convert <output.dslv> [input.txt]
 //
-//   level_convert <output.dslv>
+// With an input text file, the file is parsed (engine/LevelTextParser.h) into a
+// LevelData and written out as binary; on a parse error the message is printed
+// and the tool exits non-zero. With no input file it falls back to emitting the
+// hardcoded DoomScroller arena (the same room Engine::buildArena generates plus
+// the enemy spawn corners and a placeholder light) for back-compat.
 //
-// A future revision can swap buildArena() for a text/JSON description parser;
-// the on-disk format (engine/LevelFormat.h) stays the same.
+// The on-disk format (engine/LevelFormat.h) is identical either way.
 
 #include "engine/LevelFormat.h"
 #include "engine/LevelLoader.h"
+#include "engine/LevelTextParser.h"
 
 #include <cstdio>
-#include <cstring>
+#include <optional>
+#include <string>
 
 using namespace ds;
 
@@ -56,7 +60,7 @@ LevelData buildArenaLevel() {
     data.boxes.push_back(makeBox(-W - T, H / 2, 0.f, T, H / 2, D)); // west wall
     data.boxes.push_back(makeBox(W + T, H / 2, 0.f, T, H / 2, D));  // east wall
 
-    data.spawns.push_back(makeSpawn(0.f, 1.7f, 0.f, 1u));           // player start
+    data.spawns.push_back(makeSpawn(0.f, 1.7f, 0.f, 1u)); // player start
     data.spawns.push_back(makeSpawn(-7.f, 1.5f, -7.f, 0u));
     data.spawns.push_back(makeSpawn(7.f, 1.5f, -7.f, 0u));
     data.spawns.push_back(makeSpawn(0.f, 1.5f, 7.f, 0u));
@@ -75,21 +79,59 @@ LevelData buildArenaLevel() {
     return data;
 }
 
+// Read an entire file into a string. Returns false (and leaves `out` unspecified)
+// if the file cannot be opened or read.
+bool readFile(const char* path, std::string& out) {
+    std::FILE* f = std::fopen(path, "rb");
+    if (f == nullptr) {
+        return false;
+    }
+    out.clear();
+    char buf[4096];
+    size_t got = 0;
+    while ((got = std::fread(buf, 1, sizeof(buf), f)) > 0) {
+        out.append(buf, got);
+    }
+    const bool ok = std::ferror(f) == 0;
+    std::fclose(f);
+    return ok;
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
-    if (argc != 2) {
-        std::fprintf(stderr, "usage: %s <output.dslv>\n", argv[0]);
+    if (argc != 2 && argc != 3) {
+        std::fprintf(stderr, "usage: %s <output.dslv> [input.txt]\n", argv[0]);
         return 2;
     }
 
-    LevelData data = buildArenaLevel();
-    if (!LevelLoader::write(argv[1], data)) {
-        std::fprintf(stderr, "level_convert: failed to write '%s'\n", argv[1]);
+    const char* outputPath = argv[1];
+
+    LevelData data;
+    if (argc == 3) {
+        const char* inputPath = argv[2];
+        std::string text;
+        if (!readFile(inputPath, text)) {
+            std::fprintf(stderr, "level_convert: failed to read '%s'\n", inputPath);
+            return 1;
+        }
+        std::string error;
+        std::optional<LevelData> parsed = parseLevelText(text, &error);
+        if (!parsed.has_value()) {
+            std::fprintf(stderr, "level_convert: parse error in '%s': %s\n", inputPath, error.c_str());
+            return 1;
+        }
+        data = std::move(*parsed);
+    } else {
+        data = buildArenaLevel();
+    }
+
+    if (!LevelLoader::write(outputPath, data)) {
+        std::fprintf(stderr, "level_convert: failed to write '%s'\n", outputPath);
         return 1;
     }
 
-    std::printf("level_convert: wrote %s (%zu boxes, %zu spawns, %zu lights)\n", argv[1], data.boxes.size(),
+    std::printf("level_convert: wrote %s (%zu boxes, %zu spawns, %zu lights)\n", outputPath, data.boxes.size(),
                 data.spawns.size(), data.lights.size());
     return 0;
 }

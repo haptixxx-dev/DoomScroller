@@ -25,6 +25,12 @@ class PhysicsWorld {
     // Add a dynamic capsule body. Returns opaque body ID.
     uint32_t addCapsule(float halfHeight, float radius, glm::vec3 position);
 
+    // Add a dynamic (moving) box body with an initial linear velocity. Returns opaque body ID.
+    uint32_t addDynamicBox(glm::vec3 center, glm::vec3 halfExtents, glm::vec3 initialVelocity = {});
+
+    // Remove and destroy a body from the physics system.
+    void removeBody(uint32_t bodyId);
+
     glm::vec3 getPosition(uint32_t bodyId) const;
     void setPosition(uint32_t bodyId, glm::vec3 position);
     glm::vec3 getLinearVelocity(uint32_t bodyId) const;

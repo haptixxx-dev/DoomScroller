@@ -1,19 +1,34 @@
 #pragma once
 
+#include <cstdint>
 #include <entt/entt.hpp>
 #include <functional>
 #include <glm/glm.hpp>
+#include <vector>
 
 namespace ds {
 class PhysicsWorld;
 
+// One enemy damaged by a projectile (direct or splash), reported back so the
+// Engine can spawn a floating damage number / hit marker (task 29) without
+// ProjectileSystem depending on the combat-feedback layer.
+struct ProjectileEnemyHit {
+    glm::vec3 worldPos{0.f};
+    int amount  = 0;
+    bool killed = false;
+};
+
 // Result of a projectile detonation, passed back to the engine so it can spawn
 // VFX/audio/light without ProjectileSystem depending on those subsystems.
 struct ProjectileImpact {
-    glm::vec3 position{0.f};    // world-space detonation point
-    glm::vec3 normal{0.f};      // surface/travel normal (points back toward the shooter)
-    float splashRadius = 0.f;
-    bool hitEnemy      = false; // true if a direct enemy hit (vs. world geometry / timeout)
+    glm::vec3 position{0.f};                   // world-space detonation point
+    glm::vec3 normal{0.f};                     // surface/travel normal (points back toward the shooter)
+    float splashRadius   = 0.f;
+    bool hitEnemy        = false;              // true if a direct enemy hit (vs. world geometry / timeout)
+    uint32_t hitBodyId   = UINT32_MAX;         // physics body the ray struck (UINT32_MAX = none)
+    uint32_t ownerBodyId = 0;                  // the projectile's owner (shooter) body
+    int directDamage     = 0;                  // the projectile's damage on a direct body hit (0 if none)
+    std::vector<ProjectileEnemyHit> enemyHits; // per-enemy damage for floating numbers
 };
 
 // Called once per detonation. Optional; may be empty.

@@ -38,6 +38,27 @@ class ParticleSystem {
         glm::vec4 color{0.f};
     };
 
+    // Per-particle state uploaded to the GPU compute sim (task 39). Layout must
+    // match `GpuParticle` in particle_sim.slang (std430): position+size,
+    // color, velocity+life. Dead particles carry life<=0 so the shader emits a
+    // zero-size instance for them.
+    struct GpuParticle {
+        glm::vec3 position{0.f};
+        float size = 0.f;
+        glm::vec4 color{0.f};
+        glm::vec3 velocity{0.f};
+        float life = 0.f;
+    };
+
+    // Snapshot the alive particles into a flat GpuParticle array for the compute
+    // path, ALPHA-blend particles first then ADDITIVE. Index i in the array maps
+    // to instance i in the dispatch output, so the alpha bucket is the prefix
+    // [0, gpuAlphaCount()) and the additive bucket is the suffix. Reused across
+    // frames (cleared, not realloced).
+    const std::vector<GpuParticle>& gpuParticles() const { return m_gpuParticles; }
+    std::size_t gpuAlphaCount() const { return m_gpuAlphaCount; }
+    void buildGpuParticles();
+
     ParticleSystem();
 
     // Advance the simulation: integrate motion + gravity, age particles, fade
@@ -85,6 +106,8 @@ class ParticleSystem {
 
     std::vector<Instance> m_alphaInstances;
     std::vector<Instance> m_additiveInstances;
+    std::vector<GpuParticle> m_gpuParticles;
+    std::size_t m_gpuAlphaCount = 0;
 
     float randUnit();         // [0,1)
     glm::vec3 randInSphere(); // unit-ball vector

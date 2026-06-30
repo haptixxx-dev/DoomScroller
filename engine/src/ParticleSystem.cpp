@@ -150,4 +150,22 @@ void ParticleSystem::buildInstances() {
     }
 }
 
+void ParticleSystem::buildGpuParticles() {
+    m_gpuParticles.clear();
+    m_gpuAlphaCount = 0;
+
+    // Alpha bucket first so the dispatch output's prefix is the alpha draw range
+    // and the suffix is the additive draw range (see renderParticlesCompute).
+    for (const Particle& p : m_particles) {
+        if (p.alive && p.blend == Blend::Alpha) {
+            m_gpuParticles.push_back(GpuParticle{p.position, p.size, p.color, p.velocity, p.life});
+            ++m_gpuAlphaCount;
+        }
+    }
+    for (const Particle& p : m_particles) {
+        if (p.alive && p.blend == Blend::Additive)
+            m_gpuParticles.push_back(GpuParticle{p.position, p.size, p.color, p.velocity, p.life});
+    }
+}
+
 } // namespace ds

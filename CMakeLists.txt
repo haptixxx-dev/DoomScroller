@@ -98,12 +98,33 @@ else()
     set(_shader_targets spirv)
 endif()
 
+# Primary shader target format, baked into BuildConfig.h for DS_DEV runtime
+# shader recompiles (ShaderWatcher). The runtime ShaderLoader picks whichever
+# of spirv/msl/dxil the GPU supports; on each platform the first listed target
+# is the one that GPU will use, so recompile to that format.
+list(GET _shader_targets 0 DS_PRIMARY_SHADER_TARGET)
+
 ds_compile_slang(
     SOURCES   ${CMAKE_SOURCE_DIR}/shaders/triangle.slang
               ${CMAKE_SOURCE_DIR}/shaders/mesh.slang
               ${CMAKE_SOURCE_DIR}/shaders/particle.slang
               ${CMAKE_SOURCE_DIR}/shaders/ui.slang
+              ${CMAKE_SOURCE_DIR}/shaders/tonemap.slang
+              ${CMAKE_SOURCE_DIR}/shaders/shadow_depth.slang
+              ${CMAKE_SOURCE_DIR}/shaders/post.slang
+              ${CMAKE_SOURCE_DIR}/shaders/blur.slang
     STAGES    vertex fragment
+    TARGETS   ${_shader_targets}
+    OUT_DIR   "${_shader_out}"
+)
+
+# Compute shaders (task 39): a separate invocation with the compute stage
+# (entry compMain). Shares the same output dir; CompileSlang.cmake tags the
+# custom-target name with the stage list so this does not collide with the
+# vertex/fragment batch above.
+ds_compile_slang(
+    SOURCES   ${CMAKE_SOURCE_DIR}/shaders/particle_sim.slang
+    STAGES    compute
     TARGETS   ${_shader_targets}
     OUT_DIR   "${_shader_out}"
 )
