@@ -8,6 +8,7 @@
 #include "engine/MeshLoader.h"
 #include "engine/Paths.h"
 #include "engine/PlayerController.h"
+#include "engine/ProceduralTextures.h"
 #include "engine/Profiler.h"
 #include "engine/ShaderLoader.h"
 #include "engine/ShadowMatrix.h"
@@ -91,20 +92,6 @@ static MeshComponent makeBoxMesh(rhi::IRHIDevice& device, float hw, float hh, fl
     device.uploadImmediate(ib, idx, ibd.size);
 
     return MeshComponent{vb, ib, 36u, rhi::IndexType::Uint16};
-}
-
-// 4x4 RGBA8 checkerboard (white/grey) used as a placeholder texture
-static uint8_t makeCheckerboard(uint8_t* out, uint32_t w, uint32_t h) {
-    for (uint32_t y = 0; y < h; ++y) {
-        for (uint32_t x = 0; x < w; ++x) {
-            bool bright = ((x + y) & 1) == 0;
-            uint8_t v   = bright ? 255u : 128u;
-            uint8_t* p  = out + (y * w + x) * 4;
-            p[0] = p[1] = p[2] = v;
-            p[3]               = 255u;
-        }
-    }
-    return 0;
 }
 
 // World-space AABB of every BoxRecord + MeshRecord in `data` (the seam shared
@@ -595,11 +582,52 @@ void Engine::initScene() {
         m_pointShadowPipeline            = m_device->createPipeline(pointShadowPipe);
     }
 
-    // Checkerboard placeholder texture
-    constexpr uint32_t kTexW = 8, kTexH = 8;
-    uint8_t pixels[kTexW * kTexH * 4];
-    makeCheckerboard(pixels, kTexW, kTexH);
-    rhi::RHITexture albedo = m_textures->createFromMemory(pixels, kTexW, kTexH, "checkerboard");
+    // Procedurally generated surface textures (no image-asset pipeline exists
+    // yet — see engine/ProceduralTextures.h). Each entity category's existing
+    // vertex-color tint (room WHITE/PILLAR_COLOR, enemy archetype colors,
+    // projectile bolt colors — all already wired through MaterialComponent's
+    // albedo*vertexColor*tint multiply in mesh.slang) still differentiates
+    // instances; the texture adds real surface detail underneath that tint.
+    constexpr uint32_t kSurfaceTexSize = 128;
+    std::vector<uint8_t> texPixels(static_cast<size_t>(kSurfaceTexSize) * kSurfaceTexSize * 4);
+
+    // Level geometry (floor/walls/ceiling/pillars/Lua meshes): light concrete
+    // with subtle grain and a panel grid.
+    ProceduralTextureParams levelParams{};
+    levelParams.baseColor[0]  = 195;
+    levelParams.baseColor[1]  = 195;
+    levelParams.baseColor[2]  = 200;
+    levelParams.noiseScale    = 10.f;
+    levelParams.noiseStrength = 0.15f;
+    levelParams.gridSpacing   = 4.f;
+    levelParams.gridLineWidth = 0.03f;
+    levelParams.gridDarken    = 0.55f;
+    levelParams.seed          = 1;
+    generateProceduralTexture(texPixels.data(), kSurfaceTexSize, kSurfaceTexSize, levelParams);
+    rhi::RHITexture albedo =
+        m_textures->createFromMemory(texPixels.data(), kSurfaceTexSize, kSurfaceTexSize, "concrete");
+
+    // Enemy hulls: darker, higher-contrast plating, no grid (organic-ish armor
+    // rather than ruled panels).
+    ProceduralTextureParams enemyParams{};
+    enemyParams.baseColor[0]  = 140;
+    enemyParams.baseColor[1]  = 140;
+    enemyParams.baseColor[2]  = 150;
+    enemyParams.noiseScale    = 14.f;
+    enemyParams.noiseStrength = 0.3f;
+    enemyParams.gridSpacing   = 0.f;
+    enemyParams.seed          = 2;
+    generateProceduralTexture(texPixels.data(), kSurfaceTexSize, kSurfaceTexSize, enemyParams);
+    rhi::RHITexture enemyTex =
+        m_textures->createFromMemory(texPixels.data(), kSurfaceTexSize, kSurfaceTexSize, "enemy_armor");
+
+    // Projectiles: a neutral white glow blob (radial falloff baked into RGB,
+    // see generateGlowTexture's doc comment) tinted per-bolt by the existing
+    // per-entity vertex color, so one shared texture covers every weapon.
+    constexpr uint32_t kGlowTexSize = 32;
+    std::vector<uint8_t> glowPixels(static_cast<size_t>(kGlowTexSize) * kGlowTexSize * 4);
+    generateGlowTexture(glowPixels.data(), kGlowTexSize, kGlowTexSize, 255, 255, 255);
+    rhi::RHITexture glowTex = m_textures->createFromMemory(glowPixels.data(), kGlowTexSize, kGlowTexSize, "glow");
 
     m_camera.yaw = -90.f;
 
@@ -666,13 +694,13 @@ void Engine::initScene() {
     m_world.emplace<HealthComponent>(m_playerEntity, HealthComponent{kPlayerMaxHealth, kPlayerMaxHealth});
 
     // Enemy material is reused when respawning the wave.
-    m_enemyAlbedo  = albedo;
+    m_enemyAlbedo  = enemyTex;
     m_enemySampler = m_linearSampler;
     m_sceneAlbedo  = albedo;
     m_sceneSampler = m_linearSampler;
 
-    // Projectile meshes reuse the placeholder albedo/sampler.
-    m_projectileAlbedo  = albedo;
+    // Projectile meshes share the glow texture/sampler.
+    m_projectileAlbedo  = glowTex;
     m_projectileSampler = m_linearSampler;
 
     // Weapon loadout (slot order = number keys 1..N). Slot 0 is the original
@@ -1040,12 +1068,12 @@ void Engine::initScripts() {
     // with the shake/recoil copy render() builds each frame.
     cb.camera.getPosition = [this] { return m_camera.position; };
     cb.camera.setPosition = [this](const glm::vec3& p) { m_camera.position = p; };
-    cb.camera.getYaw       = [this] { return m_camera.yaw; };
-    cb.camera.setYaw       = [this](float y) { m_camera.yaw = y; };
-    cb.camera.getPitch     = [this] { return m_camera.pitch; };
-    cb.camera.setPitch     = [this](float p) { m_camera.pitch = p; };
-    cb.camera.getFovY      = [this] { return m_camera.fovY; };
-    cb.camera.setFovY      = [this](float f) { m_camera.fovY = f; };
+    cb.camera.getYaw      = [this] { return m_camera.yaw; };
+    cb.camera.setYaw      = [this](float y) { m_camera.yaw = y; };
+    cb.camera.getPitch    = [this] { return m_camera.pitch; };
+    cb.camera.setPitch    = [this](float p) { m_camera.pitch = p; };
+    cb.camera.getFovY     = [this] { return m_camera.fovY; };
+    cb.camera.setFovY     = [this](float f) { m_camera.fovY = f; };
 
     // ds.Global.player: health is read/write; the rest mirror PlayerController's
     // read-only accessors. m_playerEntity doesn't exist until later in
@@ -1129,9 +1157,9 @@ void Engine::spawnWaveEnemies(int count) {
     // spawns that archetype; otherwise archetype varies by wave + index so
     // later waves field Chargers and Ranged enemies too.
     for (int i = 0; i < count; ++i) {
-        const SpawnPoint& spot = spots[i % spots.size()];
-        EnemyArchetype archetype =
-            spot.archetypeHint >= 0 ? static_cast<EnemyArchetype>(spot.archetypeHint) : archetypeForWave(m_wave.wave, i);
+        const SpawnPoint& spot   = spots[i % spots.size()];
+        EnemyArchetype archetype = spot.archetypeHint >= 0 ? static_cast<EnemyArchetype>(spot.archetypeHint)
+                                                           : archetypeForWave(m_wave.wave, i);
         spawnEnemy(spot.position, m_enemyAlbedo, m_enemySampler, archetype);
     }
 }
@@ -1190,9 +1218,9 @@ void Engine::startGame() {
     m_recoil                 = Recoil{};
     m_hitstop                = Hitstop{};
     m_scripts.parryReset();
-    m_parryFlash             = 0.f;
-    m_parryPressed           = false;
-    m_altFirePressed         = false;
+    m_parryFlash     = 0.f;
+    m_parryPressed   = false;
+    m_altFirePressed = false;
     m_damageEvents.clear();
     m_hitMarker = HitMarker{};
 
@@ -1546,7 +1574,7 @@ void Engine::pickupSystem(float dt) {
         transform.rotation = glm::angleAxis(m_timeAccum * 2.5f, glm::vec3{0.f, 1.f, 0.f});
 
         PickupCollect cc = m_scripts.pickupCollectCheck(playerPos, transform.position, kPickupRadius, pickup.value,
-                                                          playerHealth.max - playerHealth.current);
+                                                        playerHealth.max - playerHealth.current);
         if (!cc.collected)
             continue;
 
@@ -1645,10 +1673,10 @@ void Engine::bossSystem(float dt) {
         int oldPhase          = boss.phase;
         int oldPattern        = boss.pattern;
         BossTickResult result = m_scripts.bossTick(health.current, boss.maxHealth, dt, transform.position,
-                                                     m_camera.position, boss.physicsBodyId);
-        boss.phase           = result.phase;
-        boss.vulnerableTimer = result.vulnerableTimer;
-        boss.pattern         = static_cast<uint8_t>(result.pattern);
+                                                   m_camera.position, boss.physicsBodyId);
+        boss.phase            = result.phase;
+        boss.vulnerableTimer  = result.vulnerableTimer;
+        boss.pattern          = static_cast<uint8_t>(result.pattern);
 
         if (boss.phase > oldPhase) {
             // Window the player can punish / parry.
@@ -1778,7 +1806,7 @@ void Engine::buildArena(rhi::RHITexture albedo, rhi::RHISampler sampler) {
     // Sized to this fallback room exactly (rather than relying on
     // m_levelBounds's matching default) so the sun shadow frustum stays
     // correct even if these constants ever change.
-    m_levelBounds = ds::Bounds{glm::vec3{-W - T, -T, -D - T}, glm::vec3{W + T, H + T, D + T}};
+    m_levelBounds      = ds::Bounds{glm::vec3{-W - T, -T, -D - T}, glm::vec3{W + T, H + T, D + T}};
     const Face faces[] = {
         // Floor (y=0), normal +Y
         {{{{-W, 0, -D}, {1, 1, 1}, {0, D}, {0, 1, 0}},
@@ -2423,7 +2451,7 @@ void Engine::renderDepthOnly(rhi::IRHICommandList* cmd, const glm::mat4& lightSp
 }
 
 void Engine::renderPointShadowFace(rhi::IRHICommandList* cmd, int face, const glm::mat4& faceLightSpace,
-                                    const glm::vec3& lightPos) {
+                                   const glm::vec3& lightPos) {
     cmd->setPipeline(m_pointShadowPipeline);
 
     // point_shadow_depth.slang's gPush is read by BOTH the vertex stage
@@ -2670,7 +2698,7 @@ void Engine::render() {
         const bool drawThisFace        = m_quality.shadows && pointShadow.active;
         const glm::mat4 faceLightSpace = pointShadow.faceMatrices[face];
         const glm::vec3 lightPos       = pointShadow.lightPos;
-        facePass.record = [this, face, faceLightSpace, lightPos, drawThisFace](rhi::IRHICommandList& c) {
+        facePass.record                = [this, face, faceLightSpace, lightPos, drawThisFace](rhi::IRHICommandList& c) {
             if (drawThisFace)
                 renderPointShadowFace(&c, face, faceLightSpace, lightPos);
         };
@@ -2724,7 +2752,7 @@ void Engine::render() {
             // samplePointShadow is simply never invoked.
             for (int face = 0; face < 6; ++face)
                 cmd->bindFragmentTexture(2u + static_cast<uint32_t>(face), m_pointShadowFaces[face],
-                                          m_pointShadowSampler);
+                                                   m_pointShadowSampler);
             struct PointShadowUniform {
                 glm::mat4 faceMatrices[6];
                 glm::vec4 lightPosActive;
