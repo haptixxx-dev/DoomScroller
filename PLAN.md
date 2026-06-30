@@ -155,9 +155,133 @@ Fast-paced 3D FPS. Doom / ULTRAKILL / HyperDemon style. Arena combat, aggressive
 Phase 2 (tasks 11-20) is **done** - two-way combat, audio/UI/VFX feedback, movement
 tech, projectiles, waves/state, level format, and Lua hooks all landed green.
 
-Phase 3 (tasks 21-45) = push to a shippable vertical slice: a real multi-pass
-renderer (HDR/PBR/shadows/bloom), deeper ULTRAKILL-style game feel and content,
-and the tooling/infra (settings, save, input, cook, editor, packaging) around it.
+Phase 3 (tasks 21-45) is **done** (see PR / branch `feat/phase3-vertical-slice`) -
+multi-pass renderer (HDR/tonemap, render-graph, hot-reload, bloom, PBR, sun
+shadows), frustum culling, game feel (shake/recoil/hitstop), instancing, damage
+numbers, enemy archetypes, style meter, pickups, RHICaps tier profile, parry,
+ragdoll/gibs, alt-fire/upgrades, settings store + userDir, GPU compute particles,
+boss, input map, text level parser, BC7 `.dstex` cook tool, settings menu + audio
+buses, and the SaveData blob all landed green (build + ctest, 34 test files).
+
+**Phase 3 verification ceiling:** this machine has no GPU/window, so every
+rendering feature is verified by build + slangc shader-compile + tested CPU math
+references + adversarial code review, NOT by running the binary. Five real bugs
+were caught by adversarial verification and fixed during the build (SDL3
+blend-factor INVALID, shadow sun-direction inversion, hot-reload partial-failure
+handle leak, per-spawn mesh-buffer leak, unclamped audio volumes). Phase 4 closes
+this loop.
+
+Phase 4 (tasks 46-58) = trust what Phase 3 built, then ship and deepen it:
+verification harness + real-hardware validation, CI/packaging to a downloadable
+artifact, content/progression depth, and the Enhanced-tier GPU payoff the custom
+RHI was designed for.
+
+### Phase 4 (tasks 46-58)
+
+Ordered by dependency/risk. Wave A is a prerequisite for the rest: you cannot
+tune or trust Phase 3's unseen render work without a way to see it, and a
+screenshot-diff harness turns every later render change into a regression test.
+
+| # | Task | Depends on | Key deliverable |
+|---|------|-----------|-----------------|
+| 46 | **Headless smoke target** | - | A no-GPU executable that constructs every pure system + RHI-less path; runnable in CI to catch link/ctor regressions the GPU build can't surface in the sandbox |
+| 47 | **Golden-image test harness** | 46 | Offscreen-render fixed scenes via `debugDownloadTexture` -> PPM, diff vs committed reference images with a tolerance; first real pixel validation of HDR/PBR/shadows/bloom/instancing |
+| 48 | **Real-hardware validation pass** | 47 | Run the binary on an actual GPU, capture reference images for 47, log + fix what is genuinely broken in the Phase 3 render paths (the five "unseen" features get truth-tested) |
+| 49 | **CI expansion (finish task 45)** | 46 | CI builds the tools, runs the cook step, runs all ctest suites + the smoke target, gates clang-format/clang-tidy, uploads per-OS artifacts |
+| 50 | **CPack per-OS packaging** | 49 | Windows installer/zip, macOS `.app` (+ Info.plist, Metal shaders), Linux AppImage/tarball, each staging cooked assets + compiled shaders into the `ds::paths` shipping layout |
+| 51 | **Meta-progression / persistent unlocks** | - | Wire `SaveData.unlockFlags` + run stats into between-run persistent state; unlocks survive restarts and seed the menu |
+| 52 | **Weapon unlock tree + economy** | 51 | Currency earned from style/kills, persisted unlock + upgrade choices, spend UI at intermission/menu |
+| 53 | **Difficulty curve + more levels** | 51 | Authored levels through the text-parser -> cook pipeline; tuned wave/enemy escalation curve, selectable on the menu |
+| 54 | **Enemy + boss variety** | 30, 40 | More archetypes + hazards; multi-boss / multi-pattern encounters; data-driven via Lua + archetype fields |
+| 55 | **Real `RHICaps` device query** | - | Actual `deviceVRAMBytes` / mesh-shader / bindless detection from SDL3/native handles, replacing the stub that forces Vulkan/Linux to the Minimum tier |
+| 56 | **BC7 encoder** | 55 | A real BC7 compressor behind the `.dstex` cook seam (replaces the RGBA8 stub), gated on `RHICaps`; `TextureManager` BCn upload path exercised |
+| 57 | **Mesh-shader pipeline path** | 55 | The Enhanced-tier `VK_EXT_mesh_shader` / Metal mesh-shader path via `nativeDevice()`, tier-gated; the "why a custom engine" payoff |
+| 58 | **Bindless materials + GPU compute depth** | 55, 57 | Bindless material/texture arrays; fix the one-frame GPU-particle position lead; expand GPU compute usage (culling / sim) on the Enhanced tier |
+
+Recommended execution order: **A (46-48) -> CI half of B (49) -> D (51-54) ->
+C (55-58)**, with packaging (50) near the end once there are real cooked assets
+and a validated render to ship. Wave A makes everything else verifiable; the CI
+half of B keeps it green; D ships player-facing value cheaply (mostly tested
+logic/data) while real hardware is lined up for C + task 48.
+
+#### Phase 4 task detail
+
+#### Task 46 - Headless smoke target
+- A CI-runnable executable (or ctest case) that constructs the pure systems +
+  any RHI-independent engine paths without creating a GPU device/window
+- Catches link errors, static-init order, and ctor regressions that the
+  GPU-gated build cannot surface in a headless sandbox
+- Foundation for the CI expansion (49)
+
+#### Task 47 - Golden-image test harness
+- Render a small set of fixed, deterministic scenes to an offscreen target and
+  read them back with the existing `debugDownloadTexture` -> PPM path
+- Diff against committed reference images with a per-pixel tolerance
+- First automated validation that HDR/tonemap, PBR, shadows, bloom, and
+  instancing actually produce the expected pixels (not just compile)
+- Turns every future render change into a regression test
+
+#### Task 48 - Real-hardware validation pass
+- Run the binary on an actual GPU across the three backends where possible
+- Capture the reference images task 47 diffs against
+- Truth-test and fix the Phase 3 render features that have never been seen run:
+  HDR/ACES brightness, PBR look, shadow orientation/bias, bloom intensity,
+  instanced draws, the Enhanced-tier compute particle path
+- Resolve the known Phase 3 caveats observed at runtime
+
+#### Task 49 - CI expansion (finishes the deferred half of task 45)
+- Build the offline tools (`level_convert`, `asset_cook`) in CI
+- Run the cook step on sample assets; run all three ctest suites + the smoke
+  target (46) with `--output-on-failure`
+- Keep clang-format + clang-tidy gating; upload per-OS build artifacts
+
+#### Task 50 - CPack per-OS packaging
+- Windows installer/zip, macOS `.app` (Info.plist + Metal shaders), Linux
+  AppImage/tarball
+- Each stages the binary + cooked assets + compiled shaders into the
+  binary-relative layout `ds::paths` expects in shipping mode
+- Depends on the cook tool + a validated render so the artifact is worth shipping
+
+#### Task 51 - Meta-progression / persistent unlocks
+- Use `SaveData.unlockFlags` + run-stat fields for between-run persistent state
+- Unlocks/stats survive restarts and seed the menu and economy
+- Versioned + CRC'd already (task 45 blob); just wire the gameplay meaning
+
+#### Task 52 - Weapon unlock tree + economy
+- Currency from style score / kills, persisted via SaveData
+- Unlock + upgrade choices (builds on the task-37 upgrade system) spent at a
+  menu/intermission screen
+- Drives replay value
+
+#### Task 53 - Difficulty curve + more levels
+- Author additional levels through the text-parser (42) -> cook pipeline
+- A tuned wave/enemy escalation curve; level/difficulty selection on the menu
+
+#### Task 54 - Enemy + boss variety
+- More archetypes + arena hazards; multi-phase / multi-pattern boss encounters
+- Data-driven through Lua + the archetype fields from task 30
+
+#### Task 55 - Real RHICaps device query
+- Query actual `deviceVRAMBytes` / mesh-shader / bindless support from SDL3 +
+  native handles at device creation
+- Replaces the Phase 3 stub that leaves VRAM 0 and forces Vulkan/Linux to the
+  Minimum tier; makes the tier profile (34) reflect real hardware
+
+#### Task 56 - BC7 encoder
+- A real BC7 compressor (new extern: bc7enc / ispc-texcomp) behind the `.dstex`
+  cook seam, replacing the RGBA8 placeholder
+- Gated on `RHICaps`; exercise the `TextureManager` BCn upload path + DS_DEV
+  RGBA8 fallback
+
+#### Task 57 - Mesh-shader pipeline path
+- The Enhanced-tier mesh-shader render path (Vulkan `VK_EXT_mesh_shader` / Metal
+  mesh shaders) via the `nativeDevice()` escape hatch, tier-gated
+- The core "why a custom RHI" payoff from the original design
+
+#### Task 58 - Bindless materials + GPU compute depth
+- Bindless material/texture arrays to cut per-draw binding
+- Fix the one-frame GPU-particle position lead from task 39
+- Expand GPU compute usage (e.g. culling / simulation) on the Enhanced tier
 
 ### Phase 3 (tasks 21-45)
 
