@@ -24,6 +24,7 @@
 #include <cstdio>
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
@@ -252,6 +253,24 @@ Engine::~Engine() {
         m_device->destroySampler(m_shadowSampler);
     if (m_shadowMap.valid())
         m_device->destroyTexture(m_shadowMap);
+    for (rhi::RHIBuffer& buf : m_pointShadowInstanceBuffer) {
+        if (buf.valid())
+            m_device->destroyBuffer(buf);
+    }
+    if (m_pointShadowPipeline.valid())
+        m_device->destroyPipeline(m_pointShadowPipeline);
+    if (m_pointShadowVS.valid())
+        m_device->destroyShader(m_pointShadowVS);
+    if (m_pointShadowFS.valid())
+        m_device->destroyShader(m_pointShadowFS);
+    if (m_pointShadowSampler.valid())
+        m_device->destroySampler(m_pointShadowSampler);
+    for (rhi::RHITexture& tex : m_pointShadowFaces) {
+        if (tex.valid())
+            m_device->destroyTexture(tex);
+    }
+    if (m_pointShadowDepthScratch.valid())
+        m_device->destroyTexture(m_pointShadowDepthScratch);
     if (m_particleAlphaPipe.valid())
         m_device->destroyPipeline(m_particleAlphaPipe);
     if (m_particleAdditivePipe.valid())
@@ -465,6 +484,79 @@ void Engine::initScene() {
         shadowPipe.depthCompare     = rhi::CompareOp::Less;
         shadowPipe.cullMode         = rhi::CullMode::Front;
         m_shadowPipeline            = m_device->createPipeline(shadowPipe);
+    }
+
+    // Point-light shadow faces: 6 small R32Float color targets (linear
+    // distance from the light) + one shared D32Float scratch depth (never
+    // sampled, just this pass's own hidden-surface test) + a clamp sampler.
+    // Always created (mirrors m_shadowMap above) so the mesh FS's 6 fixed
+    // texture/sampler slots stay valid on every tier.
+    rhi::TextureDesc pointFaceDesc{};
+    pointFaceDesc.width          = kPointShadowFaceSize;
+    pointFaceDesc.height         = kPointShadowFaceSize;
+    pointFaceDesc.format         = rhi::TextureFormat::R32Float;
+    pointFaceDesc.isRenderTarget = true;
+    pointFaceDesc.debugName      = "pointShadowFace";
+    for (rhi::RHITexture& face : m_pointShadowFaces) {
+        if (!face.valid())
+            face = m_device->createTexture(pointFaceDesc);
+    }
+
+    rhi::TextureDesc pointDepthDesc{};
+    pointDepthDesc.width          = kPointShadowFaceSize;
+    pointDepthDesc.height         = kPointShadowFaceSize;
+    pointDepthDesc.format         = rhi::TextureFormat::D32Float;
+    pointDepthDesc.isDepthStencil = true;
+    pointDepthDesc.debugName      = "pointShadowDepthScratch";
+    if (!m_pointShadowDepthScratch.valid())
+        m_pointShadowDepthScratch = m_device->createTexture(pointDepthDesc);
+
+    if (!m_pointShadowSampler.valid()) {
+        rhi::SamplerDesc pointSampler{};
+        pointSampler.addressU = rhi::AddressMode::ClampToEdge;
+        pointSampler.addressV = rhi::AddressMode::ClampToEdge;
+        pointSampler.addressW = rhi::AddressMode::ClampToEdge;
+        m_pointShadowSampler  = m_device->createSampler(pointSampler);
+    }
+
+    // VS/FS/pipeline/instance-buffers built only on the shadows-enabled tier
+    // (mirrors m_shadowPipeline above) — renderPointShadowFace is only ever
+    // invoked when drawShadows, so an invalid pipeline on the Minimum tier is
+    // never bound.
+    if (m_quality.shadows) {
+        m_pointShadowVS = loader.load(*m_device, "point_shadow_depth", rhi::ShaderStage::Vertex, 0, 1);
+        // Both the vertex (lightSpace) and fragment (lightPos) stages of
+        // point_shadow_depth.slang reference the SAME gPush constant buffer,
+        // so each stage's compiled module independently needs 1 uniform
+        // buffer slot (see PointShadowPush's dual push in renderPointShadowFace).
+        m_pointShadowFS = loader.load(*m_device, "point_shadow_depth", rhi::ShaderStage::Fragment, 0, 1);
+
+        for (rhi::RHIBuffer& buf : m_pointShadowInstanceBuffer) {
+            if (buf.valid())
+                continue;
+            rhi::BufferDesc pInstDesc{};
+            pInstDesc.size      = static_cast<uint64_t>(sizeof(glm::mat4)) * kMaxInstances;
+            pInstDesc.usage     = rhi::BufferUsage::Vertex;
+            pInstDesc.debugName = "point_shadow_instances";
+            buf                 = m_device->createBuffer(pInstDesc);
+        }
+
+        rhi::ColorTargetDesc pointColorTarget{};
+        pointColorTarget.format = rhi::TextureFormat::R32Float;
+
+        rhi::PipelineDesc pointShadowPipe{};
+        pointShadowPipe.vertexShader     = m_pointShadowVS;
+        pointShadowPipe.fragmentShader   = m_pointShadowFS;
+        pointShadowPipe.vertexAttributes = {attrs, 8};
+        pointShadowPipe.vertexBindings   = {vbindings, 2};
+        pointShadowPipe.colorTargets     = {&pointColorTarget, 1};
+        pointShadowPipe.hasDepth         = true;
+        pointShadowPipe.depthTest        = true;
+        pointShadowPipe.depthWrite       = true;
+        pointShadowPipe.depthFormat      = rhi::TextureFormat::D32Float;
+        pointShadowPipe.depthCompare     = rhi::CompareOp::Less;
+        pointShadowPipe.cullMode         = rhi::CullMode::Front;
+        m_pointShadowPipeline            = m_device->createPipeline(pointShadowPipe);
     }
 
     // Checkerboard placeholder texture
@@ -2272,6 +2364,81 @@ void Engine::renderDepthOnly(rhi::IRHICommandList* cmd, const glm::mat4& lightSp
     }
 }
 
+void Engine::renderPointShadowFace(rhi::IRHICommandList* cmd, int face, const glm::mat4& faceLightSpace,
+                                    const glm::vec3& lightPos) {
+    cmd->setPipeline(m_pointShadowPipeline);
+
+    // point_shadow_depth.slang's gPush is read by BOTH the vertex stage
+    // (lightSpace, to place the geometry) and the fragment stage (lightPos,
+    // to compute distance-from-light per pixel) — each stage's independently
+    // compiled module needs its own copy of the same payload, so push it to
+    // both uniform domains rather than just the vertex one (contrast
+    // renderDepthOnly's shadow_depth.slang, whose trivial fragment never
+    // touches gPush).
+    struct PointShadowPush {
+        glm::mat4 lightSpace;
+        glm::vec3 lightPos;
+        float pad0 = 0.f;
+    } push{faceLightSpace, lightPos, 0.f};
+    cmd->pushVertexConstants(&push, sizeof(push));
+    cmd->pushFragmentConstants(&push, sizeof(push));
+
+    // Same instanced-batch logic as renderDepthOnly, duplicated rather than
+    // shared: this pass uses its own per-face instance buffer (see
+    // m_pointShadowInstanceBuffer's comment in Engine.h) and a different
+    // push-constant payload, so factoring out the batch loop would buy little
+    // beyond an extra indirection in code that — unlike most of this
+    // session's work — cannot be exercised by ctest and is easier to audit
+    // duplicated than threaded through a shared helper.
+    std::vector<InstanceDraw> draws;
+    std::unordered_map<InstanceKey, MeshComponent, InstanceKeyHash> batchMesh;
+    auto view = m_world.view<Transform, MeshComponent>();
+    for (auto entity : view) {
+        auto& transform = view.get<Transform>(entity);
+        auto& mesh      = view.get<MeshComponent>(entity);
+
+        InstanceKey key{mesh.vertexBuffer.ptr, mesh.indexBuffer.ptr, nullptr};
+        InstanceDraw d;
+        d.key        = key;
+        d.indexCount = mesh.indexCount;
+        d.indexType  = mesh.indexType;
+        d.model      = transform.modelMatrix();
+        draws.push_back(d);
+        batchMesh.try_emplace(key, mesh);
+    }
+
+    std::vector<DrawBatch> batches = buildBatches(draws);
+
+    std::vector<glm::mat4> instanceData;
+    std::vector<uint32_t> firstInstance(batches.size(), 0);
+    std::vector<uint32_t> instanceCount(batches.size(), 0);
+    for (size_t bi = 0; bi < batches.size(); ++bi) {
+        firstInstance[bi] = static_cast<uint32_t>(instanceData.size());
+        for (const glm::mat4& model : batches[bi].models) {
+            if (static_cast<uint32_t>(instanceData.size()) >= kMaxInstances)
+                break;
+            instanceData.push_back(model);
+        }
+        instanceCount[bi] = static_cast<uint32_t>(instanceData.size()) - firstInstance[bi];
+    }
+
+    if (instanceData.empty())
+        return;
+    rhi::RHIBuffer instanceBuffer = m_pointShadowInstanceBuffer[face];
+    m_device->uploadImmediate(instanceBuffer, instanceData.data(), instanceData.size() * sizeof(glm::mat4), 0);
+
+    constexpr uint64_t kMat4Size = sizeof(glm::mat4);
+    for (size_t bi = 0; bi < batches.size(); ++bi) {
+        if (instanceCount[bi] == 0)
+            continue;
+        const MeshComponent& mesh = batchMesh[batches[bi].key];
+        cmd->setVertexBuffer(0, mesh.vertexBuffer);
+        cmd->setVertexBuffer(1, instanceBuffer, firstInstance[bi] * kMat4Size);
+        cmd->setIndexBuffer(mesh.indexBuffer, mesh.indexType);
+        cmd->drawIndexed(batches[bi].indexCount, instanceCount[bi], 0, 0, 0);
+    }
+}
+
 void Engine::renderBloom(rhi::IRHICommandList* cmd) {
     // Bright-pass + separable Gaussian blur (task 26). Each stage is its own
     // render pass into an RGBA16Float bloom target with a fullscreen draw(3).
@@ -2350,6 +2517,39 @@ void Engine::render() {
     const ds::Bounds arenaBounds{glm::vec3{-12.f, -2.f, -12.f}, glm::vec3{12.f, 8.f, 12.f}};
     m_sunLightSpace = ds::sunLightSpaceMatrix(-kSunDir, arenaBounds);
 
+    // Point-light shadow: pick whichever active light is nearest the camera
+    // to shadow-cast this frame (scoped to exactly one caster per frame to
+    // keep cost bounded — every other simultaneous point light stays
+    // unshadowed exactly as before). Rebuilt every frame since the nearest
+    // light changes as the player moves between rooms.
+    struct PointShadowFrame {
+        bool active = false;
+        glm::vec3 lightPos{0.f};
+        glm::mat4 faceMatrices[6]{};
+    } pointShadow;
+    {
+        int bestIdx      = -1;
+        float bestDistSq = std::numeric_limits<float>::max();
+        for (int32_t i = 0; i < m_lightBuffer.count; ++i) {
+            glm::vec3 lp      = glm::vec3(m_lightBuffer.lights[i].posRadius);
+            glm::vec3 toLight = lp - m_camera.position;
+            float distSq      = glm::dot(toLight, toLight);
+            if (distSq < bestDistSq) {
+                bestDistSq = distSq;
+                bestIdx    = static_cast<int>(i);
+            }
+        }
+        if (bestIdx >= 0) {
+            const GpuLight& light  = m_lightBuffer.lights[bestIdx];
+            pointShadow.active     = true;
+            pointShadow.lightPos   = glm::vec3(light.posRadius);
+            const float farZ       = std::max(light.posRadius.w, 1.0f);
+            constexpr float kNearZ = 0.05f;
+            for (int face = 0; face < 6; ++face)
+                pointShadow.faceMatrices[face] = ds::pointShadowFaceMatrix(pointShadow.lightPos, face, kNearZ, farZ);
+        }
+    }
+
     // Build the frame as a declarative pass list (task 23). The shadow and
     // scene passes are added to the graph; bloom still manages its own internal
     // passes and runs as a plain call between graph executions (see below); the
@@ -2383,6 +2583,40 @@ void Engine::render() {
         m_renderGraph.addPass(std::move(shadowPass));
     }
 
+    // --- Point shadow passes: 6 cube faces -> m_pointShadowFaces[face]. -----
+    // Distance-based (ShadowMatrix.h / point_shadow_depth.slang): each face's
+    // color target clears to a large distance so an unshadowed pixel (no
+    // light selected, or shadows off on the Minimum tier) reads as fully lit.
+    // Always added to the graph (mirrors the sun shadow pass above) so the
+    // textures stay in a defined cleared state for the scene pass to bind;
+    // the actual per-object draws are gated by drawThisFace below.
+    for (int face = 0; face < 6; ++face) {
+        rhi::ColorAttachment color{};
+        color.texture       = m_pointShadowFaces[face];
+        color.loadOp        = rhi::LoadOp::Clear;
+        color.storeOp       = rhi::StoreOp::Store;
+        color.clearColor[0] = 1e9f;
+
+        rhi::DepthAttachment depth{};
+        depth.texture    = m_pointShadowDepthScratch;
+        depth.loadOp     = rhi::LoadOp::Clear;
+        depth.storeOp    = rhi::StoreOp::DontCare;
+        depth.clearDepth = 1.0f;
+
+        RenderPass facePass;
+        facePass.name                  = "pointShadowFace";
+        facePass.colorAttachments      = {color};
+        facePass.depthAttachment       = depth;
+        const bool drawThisFace        = m_quality.shadows && pointShadow.active;
+        const glm::mat4 faceLightSpace = pointShadow.faceMatrices[face];
+        const glm::vec3 lightPos       = pointShadow.lightPos;
+        facePass.record = [this, face, faceLightSpace, lightPos, drawThisFace](rhi::IRHICommandList& c) {
+            if (drawThisFace)
+                renderPointShadowFace(&c, face, faceLightSpace, lightPos);
+        };
+        m_renderGraph.addPass(std::move(facePass));
+    }
+
     // --- Pass A: scene + particles -> offscreen HDR target. ----------------
     {
         rhi::ColorAttachment color{};
@@ -2404,7 +2638,7 @@ void Engine::render() {
         scenePass.name             = "scene";
         scenePass.colorAttachments = {color};
         scenePass.depthAttachment  = depth;
-        scenePass.record           = [this, viewProj](rhi::IRHICommandList& c) {
+        scenePass.record           = [this, viewProj, pointShadow](rhi::IRHICommandList& c) {
             rhi::IRHICommandList* cmd = &c;
             // Bind the shadow map (fragment texture slot 1) and push the
             // light-space matrix (fragment uniform slot 2) once; both are
@@ -2420,6 +2654,25 @@ void Engine::render() {
                 int32_t pad2 = 0;
             } shadowData{m_sunLightSpace, static_cast<int32_t>(m_shadowMapSize), 0, 0, 0};
             cmd->pushFragmentConstants(&shadowData, sizeof(shadowData), 2);
+
+            // Bind the 6 point-shadow face textures (fragment texture slots
+            // 2..7) and push their face matrices + the shadow-casting light's
+            // position (fragment uniform slot 3). lightPosActive.w is the
+            // active flag mesh.slang checks before applying any occlusion;
+            // when no light was selected this frame the faces are all-cleared
+            // distance (see the pass loop above) and active is 0, so
+            // samplePointShadow is simply never invoked.
+            for (int face = 0; face < 6; ++face)
+                cmd->bindFragmentTexture(2u + static_cast<uint32_t>(face), m_pointShadowFaces[face],
+                                          m_pointShadowSampler);
+            struct PointShadowUniform {
+                glm::mat4 faceMatrices[6];
+                glm::vec4 lightPosActive;
+            } pointShadowUniform{};
+            for (int face = 0; face < 6; ++face)
+                pointShadowUniform.faceMatrices[face] = pointShadow.faceMatrices[face];
+            pointShadowUniform.lightPosActive = glm::vec4(pointShadow.lightPos, pointShadow.active ? 1.f : 0.f);
+            cmd->pushFragmentConstants(&pointShadowUniform, sizeof(pointShadowUniform), 3);
 
             // Always draw the 3D scene so the world is visible behind paused
             // overlays (Dead / Victory) and so the Menu has a backdrop. The

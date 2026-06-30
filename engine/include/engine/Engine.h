@@ -204,6 +204,41 @@ class Engine {
     // m_shadowMap, pushing lightSpace*model as the vertex MVP.
     void renderDepthOnly(rhi::IRHICommandList* cmd, const glm::mat4& lightSpace);
 
+    // --- Point-light shadow (one shadow-casting light per frame, 6 faces). --
+    // Distance-based point-light shadow (see engine/ShadowMatrix.h's
+    // pointShadowFaceMatrix and shaders/point_shadow_depth.slang): each cube
+    // face writes linear distance-from-light into its own small R32Float
+    // color target. A single scratch D32Float depth buffer is shared and
+    // re-cleared across all 6 face passes purely for each pass's own
+    // hidden-surface test (it is never sampled afterward) — safe because the
+    // 6 passes run strictly sequentially within one frame. The face textures
+    // + sampler + scratch depth are always created (mirrors m_shadowMap's
+    // texture, which is unconditional so the mesh FS's fixed binding slots
+    // stay valid on every tier); the VS/FS/pipeline are gated by
+    // m_quality.shadows exactly like m_shadowVS/m_shadowFS/m_shadowPipeline,
+    // since renderPointShadowFace is only ever invoked when drawShadows.
+    rhi::RHIShader m_pointShadowVS         = {};
+    rhi::RHIShader m_pointShadowFS         = {};
+    rhi::RHIPipeline m_pointShadowPipeline = {};
+    rhi::RHITexture m_pointShadowFaces[6]{};
+    rhi::RHITexture m_pointShadowDepthScratch = {};
+    rhi::RHISampler m_pointShadowSampler      = {};
+    // One buffer PER FACE rather than a single shared one (mirrors why
+    // m_shadowInstanceBuffer is separate from m_instanceBuffer, see that
+    // comment above): uploadImmediate submits its copy on its own command
+    // buffer, independent of the main recorded command buffer's eventual
+    // submit, so two passes recorded back-to-back in the same frame that
+    // shared one buffer could have a later face's upload race a not-yet-
+    // executed earlier face's draw. Six small buffers (4096 mat4s each,
+    // ~1.5MB total) sidestep that entirely.
+    rhi::RHIBuffer m_pointShadowInstanceBuffer[6]{};
+    static constexpr uint32_t kPointShadowFaceSize = 512;
+    // Renders depth (as linear distance from `lightPos`) for cube face
+    // `face` into m_pointShadowFaces[face]; the caller has already bound that
+    // texture as the active pass's color attachment.
+    void renderPointShadowFace(rhi::IRHICommandList* cmd, int face, const glm::mat4& faceLightSpace,
+                                const glm::vec3& lightPos);
+
     // Offscreen HDR target (task 21). Scene + particles render into this
     // RGBA16Float texture; the tonemap pass then resolves it to the LDR
     // swapchain so HDR lighting can exceed 1.0 before the filmic curve. Created
