@@ -136,6 +136,19 @@ class ScriptSystem {
     void onEnemyDeath(uint32_t entity, float x, float y, float z);
     void onPlayerDeath(int finalScore);
 
+    // --- Parry state machine (assets/scripts/parry.lua, module ds.parry). ---
+    // Lua-side port of ParryTech.h's pure functions; Engine.cpp drives these
+    // instead of calling the (now-unused-by-Engine) C++ free functions. Every
+    // call is a no-op-friendly graceful fallback if parry.lua failed to load.
+    void parryReset();
+    void parryTrigger();
+    void parryTick(float dt);
+    bool parryActive() const;
+    glm::vec3 parryReflect(const glm::vec3& incoming, float speedBoost = 1.5f) const;
+    // Reads ds.parry.tuning.dash_refund; falls back to 1.f if parry.lua/the
+    // field is missing.
+    float parryDashRefund() const;
+
     // Raw access for advanced callers / tests.
     lua_State* state() const { return m_state; }
 
@@ -167,6 +180,15 @@ class ScriptSystem {
     // Calls the named global function with `nargs` already on the stack via pcall,
     // logging any error. Pops the function+args. No-op if the global isn't a fn.
     bool callGlobal(const char* name, int nargs);
+    // Calls ds.<moduleField>.<fn>(...) via pcall. Caller has already pushed
+    // `nargs` arguments on the stack. On success leaves `nresults` values on
+    // the stack and returns true. On any failure (ds.<moduleField> missing/not
+    // a table, the function missing/not callable, or a Lua error) pushes
+    // `nresults` nils instead (logging only the Lua-error case, mirroring
+    // callGlobal's quiet skip for an absent function) and returns false.
+    // Shared by every per-system typed wrapper (parry/wave/boss/pickups/enemy
+    // AI) so the dispatch lives in exactly one place.
+    bool callModuleFunction(const char* moduleField, const char* fn, int nargs, int nresults) const;
 
     lua_State* m_state = nullptr;
     std::string m_lastFile;

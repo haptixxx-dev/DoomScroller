@@ -43,6 +43,7 @@ add_library(engine STATIC
     src/UISystem.cpp
     src/AudioSystem.cpp
     src/ScriptSystem.cpp
+    src/ScriptSystemGameplay.cpp
     src/script/LuaUserdata.cpp
     src/script/LuaVec3.cpp
     src/script/LuaGlobal.cpp

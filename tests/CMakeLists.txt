@@ -49,7 +49,9 @@ add_executable(ds_script_tests
     test_scripting.cpp
     test_lua_vec3.cpp
     test_lua_global.cpp
+    test_parry_lua.cpp
     ${CMAKE_SOURCE_DIR}/engine/src/ScriptSystem.cpp
+    ${CMAKE_SOURCE_DIR}/engine/src/ScriptSystemGameplay.cpp
     ${CMAKE_SOURCE_DIR}/engine/src/script/LuaUserdata.cpp
     ${CMAKE_SOURCE_DIR}/engine/src/script/LuaVec3.cpp
     ${CMAKE_SOURCE_DIR}/engine/src/script/LuaGlobal.cpp
@@ -58,4 +60,8 @@ target_link_libraries(ds_script_tests PRIVATE engine_headers lua_static SDL3::SD
 if(DS_DEV)
     target_compile_definitions(ds_script_tests PRIVATE DS_DEV)
 endif()
+# Lets Lua-side gameplay-module tests (test_*_lua.cpp) loadFile() the real
+# shipped scripts under assets/scripts/ instead of duplicating their source
+# inline, so a syntax/logic error in the actual file fails the build's tests.
+target_compile_definitions(ds_script_tests PRIVATE DS_ASSETS_DIR="${CMAKE_SOURCE_DIR}/assets")
 add_test(NAME ds_script_tests COMMAND ds_script_tests)

@@ -5,7 +5,6 @@
 #include "engine/Camera.h"
 #include "engine/CombatFeedback.h"
 #include "engine/GameFeel.h"
-#include "engine/ParryTech.h"
 #include "engine/ParticleSystem.h"
 #include "engine/PhysicsWorld.h"
 #include "engine/PickupSystem.h"
@@ -326,7 +325,8 @@ class Engine {
     // wave/enemy tuning back into m_waveConfig / m_enemyStats. Graceful fallback
     // to hardcoded defaults when the file is missing or errors.
     void initScripts();
-    static constexpr const char* kWaveScript = "scripts/waves.lua";
+    static constexpr const char* kWaveScript  = "scripts/waves.lua";
+    static constexpr const char* kParryScript = "scripts/parry.lua";
     uint32_t m_playerBodyId                  = 0;
     std::unique_ptr<PlayerController> m_player;
 
@@ -432,9 +432,9 @@ class Engine {
     HitMarker m_hitMarker;
 
     // --- Parry tech (task 35): short window that negates damage, reflects a
-    // projectile, and refunds a dash charge on success. ---------------------
-    ParryState m_parry;
-    ParryTuning m_parryTuning;
+    // projectile, and refunds a dash charge on success. State/timers now live
+    // in Lua (assets/scripts/parry.lua, module ds.parry) behind m_scripts'
+    // parry*() wrappers; Engine only keeps the input edge-detect + HUD flash.
     bool m_parryPressed  = false;
     float m_parryFlash   = 0.f; // HUD flash timer on a successful parry
     bool m_parryHeldPrev = false;

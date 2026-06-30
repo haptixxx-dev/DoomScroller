@@ -305,6 +305,38 @@ bool ScriptSystem::callGlobal(const char* name, int nargs) {
     return true;
 }
 
+bool ScriptSystem::callModuleFunction(const char* moduleField, const char* fn, int nargs, int nresults) const {
+    // Stack on entry: nargs args already pushed on top.
+    lua_getglobal(m_state, "ds");
+    lua_getfield(m_state, -1, moduleField);
+    lua_remove(m_state, -2); // ds; stack: args..., module
+    if (!lua_istable(m_state, -1)) {
+        lua_pop(m_state, 1 + nargs); // module (non-table) + args
+        for (int i = 0; i < nresults; ++i)
+            lua_pushnil(m_state);
+        return false;
+    }
+    lua_getfield(m_state, -1, fn);
+    lua_remove(m_state, -2); // module table; stack: args..., fn
+    if (!lua_isfunction(m_state, -1)) {
+        lua_pop(m_state, 1 + nargs); // fn (non-function) + args
+        for (int i = 0; i < nresults; ++i)
+            lua_pushnil(m_state);
+        return false;
+    }
+    lua_insert(m_state, -(nargs + 1)); // move fn below the args
+    if (lua_pcall(m_state, nargs, nresults, 0) != LUA_OK) {
+        const char* err = lua_tostring(m_state, -1);
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "ScriptSystem: error in 'ds.%s.%s': %s", moduleField, fn,
+                    err ? err : "(unknown error)");
+        lua_pop(m_state, 1);
+        for (int i = 0; i < nresults; ++i)
+            lua_pushnil(m_state);
+        return false;
+    }
+    return true;
+}
+
 void ScriptSystem::onWaveStart(int wave) {
     if (!m_state)
         return;

@@ -899,6 +899,13 @@ void Engine::initScripts() {
     if (!m_scripts.init(cb))
         return;
 
+    // Parry state machine (engine/include/engine/ParryTech.h ported to Lua).
+    // Missing/broken parry.lua leaves ds.parry undefined; every ScriptSystem
+    // parry* wrapper degrades gracefully (callModuleFunction's no-op path) so
+    // gameplay just sees a parry that never triggers rather than a crash.
+    std::filesystem::path parryScriptPath = paths::assets() / kParryScript;
+    m_scripts.loadFile(parryScriptPath.string());
+
     // Load the wave/enemy config; missing or broken -> keep hardcoded defaults.
     std::filesystem::path scriptPath = paths::assets() / kWaveScript;
     if (m_scripts.loadFile(scriptPath.string())) {
@@ -1004,7 +1011,7 @@ void Engine::startGame() {
     m_screenShake            = ScreenShake{};
     m_recoil                 = Recoil{};
     m_hitstop                = Hitstop{};
-    m_parry                  = ParryState{};
+    m_scripts.parryReset();
     m_parryFlash             = 0.f;
     m_parryPressed           = false;
     m_altFirePressed         = false;
@@ -1211,7 +1218,7 @@ void Engine::spawnEnemyProjectile(const glm::vec3& origin, const glm::vec3& velo
 
 void Engine::processEnemyProjectiles() {
     const glm::vec3 playerPos   = m_camera.position;
-    const bool parryActive      = parrySucceeds(m_parry);
+    const bool parryActive      = m_scripts.parryActive();
     constexpr float kParryReach = 3.0f; // reflect bolts within this radius
     constexpr float kHitReach   = 0.6f; // bolt counts as a player hit within this radius
 
@@ -1230,10 +1237,10 @@ void Engine::processEnemyProjectiles() {
         if (parryActive && dist <= kParryReach) {
             // Reflect: flip + speed-boost the velocity and re-own to the player
             // so the owner-ignore ray lets it strike enemies. Leave it alive.
-            proj.velocity    = reflectProjectileVelocity(proj.velocity);
+            proj.velocity    = m_scripts.parryReflect(proj.velocity);
             proj.ownerBodyId = m_playerBodyId;
             // Successful parry payoff: dash refund, style, a flash + hitstop.
-            m_player->refundDash(static_cast<int>(m_parryTuning.dashRefund));
+            m_player->refundDash(static_cast<int>(m_scripts.parryDashRefund()));
             addStyleEvent(m_style, StyleEvent::Parry, m_styleConfig);
             m_parryFlash = 0.3f;
             triggerHitstop(m_hitstop, 0.05f);
@@ -1917,10 +1924,10 @@ void Engine::updatePlaying() {
     bool crouchHeld  = keys[SDL_SCANCODE_LCTRL] || keys[SDL_SCANCODE_RCTRL];
 
     // --- Parry (task 35): tick timers, then open a window on the parry input
-    // (self-gated on cooldown inside triggerParry).
-    tickParry(m_parry, m_dt);
+    // (self-gated on cooldown inside ds.parry.trigger).
+    m_scripts.parryTick(m_dt);
     if (m_parryPressed) {
-        triggerParry(m_parry, m_parryTuning);
+        m_scripts.parryTrigger();
         m_audio.play(kSfxParry); // parry chime (task 44)
     }
     m_parryPressed = false;
@@ -1992,7 +1999,7 @@ void Engine::updatePlaying() {
     // step (applyDamage drops any hit while iFrames > 0). A successful parry that
     // actually had something to react to refunds a dash charge + scores style;
     // here we always treat an active window as "succeeded" for negation.
-    const bool parryActive = parrySucceeds(m_parry);
+    const bool parryActive = m_scripts.parryActive();
     if (parryActive)
         m_playerIFrames = std::max(m_playerIFrames, m_dt + 1e-3f);
 
