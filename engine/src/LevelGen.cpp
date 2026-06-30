@@ -26,12 +26,13 @@ bool generateLevelFromLua(const std::filesystem::path& scriptPath, LevelData& ou
     cb.levelAddMesh = [&outMeshes](const std::string& path, glm::vec3 position, glm::quat rotation) {
         outMeshes.push_back(LuaMeshPlacement{path, position, rotation});
     };
-    cb.levelAddSpawn = [&outData](glm::vec3 position, bool isPlayerStart) {
+    cb.levelAddSpawn = [&outData](glm::vec3 position, bool isPlayerStart, int archetypeHint) {
         SpawnPointRecord s{};
-        s.position[0] = position.x;
-        s.position[1] = position.y;
-        s.position[2] = position.z;
-        s.flags       = isPlayerStart ? 1u : 0u;
+        s.position[0]          = position.x;
+        s.position[1]          = position.y;
+        s.position[2]          = position.z;
+        uint32_t archetypeBits = archetypeHint >= 0 ? (static_cast<uint32_t>(archetypeHint) + 1u) & 0x3u : 0u;
+        s.flags                = (isPlayerStart ? 1u : 0u) | (archetypeBits << 1);
         outData.spawns.push_back(s);
     };
     cb.levelAddLight = [&outData](glm::vec3 position, glm::vec3 color, float radius, float intensity) {

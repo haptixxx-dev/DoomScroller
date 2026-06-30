@@ -101,7 +101,7 @@ class Engine {
     void spawnWaveEnemies(int count);
     // Collects SpawnPoint entity positions, falling back to arena corners when
     // the world has none. Used to place each wave.
-    std::vector<glm::vec3> waveSpawnPositions() const;
+    std::vector<SpawnPoint> waveSpawnPositions() const;
     // Full reset for (re)starting a run: clears the world, rebuilds the level,
     // respawns the player and resets waves/score, then enters Playing.
     void startGame();

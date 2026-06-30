@@ -83,7 +83,13 @@ struct BoxRecord {
 // Player / enemy spawn location.
 struct SpawnPointRecord {
     float position[3] = {0.f, 0.f, 0.f};
-    uint32_t flags    = 0; // bit0: player start; reserved otherwise
+    // bit0: player start (1) vs enemy spawn (0).
+    // bits 1-2: enemy archetype hint (enemy spawns only): 0 = no hint (the
+    // engine's default wave/index-based selection), 1 = Grunt, 2 = Charger,
+    // 3 = Ranged (value = EnemyArchetype's int value + 1). See
+    // ecs/Components.h's SpawnPoint::archetypeHint.
+    // Remaining bits reserved, must be 0.
+    uint32_t flags = 0;
 };
 
 // Light definition. Reserved ahead of the lighting task (task 15); the loader

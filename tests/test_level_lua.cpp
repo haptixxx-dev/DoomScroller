@@ -20,6 +20,7 @@ struct CapturedMesh {
 struct CapturedSpawn {
     glm::vec3 position;
     bool isPlayer;
+    int archetypeHint;
 };
 struct CapturedLight {
     glm::vec3 position, color;
@@ -75,20 +76,27 @@ TEST_CASE("ds.level.add_mesh captures path/position and converts optional Euler 
     REQUIRE(meshes[1].rotation.w == Catch::Approx(0.70710678f).margin(1e-4));
 }
 
-TEST_CASE("ds.level.add_spawn captures position and player flag", "[scripting][level]") {
+TEST_CASE("ds.level.add_spawn captures position, player flag, and archetype hint", "[scripting][level]") {
     ScriptSystem scripts;
     ScriptSystem::Callbacks cb{};
     std::vector<CapturedSpawn> spawns;
-    cb.levelAddSpawn = [&](glm::vec3 pos, bool isPlayer) { spawns.push_back({pos, isPlayer}); };
+    cb.levelAddSpawn = [&](glm::vec3 pos, bool isPlayer, int archetypeHint) {
+        spawns.push_back({pos, isPlayer, archetypeHint});
+    };
 
     REQUIRE(scripts.init(cb));
     REQUIRE(scripts.doString("ds.level.add_spawn(Vec3.new(0, 1.7, 0), true)\n"
-                              "ds.level.add_spawn(Vec3.new(5, 1.5, 5), false)"));
+                              "ds.level.add_spawn(Vec3.new(5, 1.5, 5), false)\n"
+                              "ds.level.add_spawn(Vec3.new(-5, 1.5, -5), false, 1)"));
 
-    REQUIRE(spawns.size() == 2);
+    REQUIRE(spawns.size() == 3);
     REQUIRE(spawns[0].position == glm::vec3{0.f, 1.7f, 0.f});
     REQUIRE(spawns[0].isPlayer);
+    REQUIRE(spawns[0].archetypeHint == -1);
     REQUIRE_FALSE(spawns[1].isPlayer);
+    REQUIRE(spawns[1].archetypeHint == -1); // no archetype arg -> no hint
+    REQUIRE_FALSE(spawns[2].isPlayer);
+    REQUIRE(spawns[2].archetypeHint == 1); // Charger
 }
 
 TEST_CASE("ds.level.add_light captures position/color/radius/intensity", "[scripting][level]") {
@@ -126,7 +134,7 @@ TEST_CASE("the shipped assets/scripts/level.lua generates the expected counts", 
     int boxCount = 0, spawnCount = 0, lightCount = 0;
     bool sawPlayerSpawn = false;
     cb.levelAddBox   = [&](glm::vec3, glm::vec3, glm::vec3) { ++boxCount; };
-    cb.levelAddSpawn = [&](glm::vec3, bool isPlayer) {
+    cb.levelAddSpawn = [&](glm::vec3, bool isPlayer, int) {
         ++spawnCount;
         if (isPlayer)
             sawPlayerSpawn = true;
@@ -136,13 +144,20 @@ TEST_CASE("the shipped assets/scripts/level.lua generates the expected counts", 
     REQUIRE(scripts.init(cb));
     REQUIRE(scripts.loadFile(std::string(DS_ASSETS_DIR) + "/scripts/level.lua"));
 
-    // level.lua randomizes room size/pillar/spawn counts each run (Lua 5.4
-    // auto-seeds math.random per-state), so this asserts ranges rather than
-    // exact counts: 6 walls + 4..8 pillars, 1 player + 3..6 enemy spawns.
+    // level.lua randomizes room count (2..4), per-room width/pillars/spawns,
+    // and door-segment geometry each run (Lua 5.4 auto-seeds math.random
+    // per-state), so this asserts ranges spanning every possible outcome
+    // rather than exact counts:
+    //   boxes:  4*rooms (floor/ceiling/N/S) + 1 (west wall) + 1 (east wall)
+    //           + up to 2*(rooms-1) door segments + up to 2*rooms pillars
+    //           -> [10, 32] across rooms in [2,4]
+    //   spawns: 2..4 per room + 1 player -> [5, 17] across rooms in [2,4]
+    //   lights: exactly 1 per room -> [2, 4]
     REQUIRE(boxCount >= 10);
-    REQUIRE(boxCount <= 14);
-    REQUIRE(spawnCount >= 4);
-    REQUIRE(spawnCount <= 7);
-    REQUIRE(lightCount == 1);
+    REQUIRE(boxCount <= 32);
+    REQUIRE(spawnCount >= 5);
+    REQUIRE(spawnCount <= 17);
+    REQUIRE(lightCount >= 2);
+    REQUIRE(lightCount <= 4);
     REQUIRE(sawPlayerSpawn);
 }

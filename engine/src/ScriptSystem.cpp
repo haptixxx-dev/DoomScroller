@@ -120,13 +120,17 @@ int l_level_add_mesh(lua_State* L) {
     return 0;
 }
 
-// ds.level.add_spawn(position, is_player)
+// ds.level.add_spawn(position, is_player [, archetype]) — archetype is an
+// optional int (0=Grunt, 1=Charger, 2=Ranged) hinting which enemy type this
+// spawn should favor; omit (or nil) for the engine's default wave/index-based
+// selection. Ignored when is_player is true.
 int l_level_add_spawn(lua_State* L) {
     ScriptSystem* self = selfFromState(L);
     glm::vec3* pos      = ds::lua::checkUserdata<glm::vec3>(L, 1);
     bool isPlayer       = lua_toboolean(L, 2) != 0;
+    int archetypeHint   = lua_isnoneornil(L, 3) ? -1 : static_cast<int>(luaL_checkinteger(L, 3));
     if (self && self->state())
-        self->invokeLevelAddSpawn(*pos, isPlayer);
+        self->invokeLevelAddSpawn(*pos, isPlayer, archetypeHint);
     return 0;
 }
 
@@ -203,9 +207,9 @@ void ScriptSystem::invokeLevelAddMesh(const std::string& meshPath, glm::vec3 pos
         m_callbacks.levelAddMesh(meshPath, position, rotation);
 }
 
-void ScriptSystem::invokeLevelAddSpawn(glm::vec3 position, bool isPlayerStart) {
+void ScriptSystem::invokeLevelAddSpawn(glm::vec3 position, bool isPlayerStart, int archetypeHint) {
     if (m_callbacks.levelAddSpawn)
-        m_callbacks.levelAddSpawn(position, isPlayerStart);
+        m_callbacks.levelAddSpawn(position, isPlayerStart, archetypeHint);
 }
 
 void ScriptSystem::invokeLevelAddLight(glm::vec3 position, glm::vec3 color, float radius, float intensity) {

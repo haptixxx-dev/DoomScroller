@@ -958,34 +958,40 @@ void Engine::spawnEnemies() {
     spawnEnemy({0.f, 1.5f, 7.f}, m_enemyAlbedo, m_enemySampler);
 }
 
-std::vector<glm::vec3> Engine::waveSpawnPositions() const {
-    std::vector<glm::vec3> out;
+std::vector<SpawnPoint> Engine::waveSpawnPositions() const {
+    std::vector<SpawnPoint> out;
     auto view = m_world.view<const SpawnPoint>();
     for (auto [entity, sp] : view.each())
-        out.push_back(sp.position);
+        out.push_back(sp);
 
     // No SpawnPoint entities: fall back to the four arena corners (matches the
     // hardcoded buildArena footprint, kept a little inside the walls).
     if (out.empty()) {
         out = {
-            {-7.f, 1.5f, -7.f},
-            {7.f, 1.5f, -7.f},
-            {-7.f, 1.5f, 7.f},
-            {7.f, 1.5f, 7.f},
+            SpawnPoint{{-7.f, 1.5f, -7.f}, -1},
+            SpawnPoint{{7.f, 1.5f, -7.f}, -1},
+            SpawnPoint{{-7.f, 1.5f, 7.f}, -1},
+            SpawnPoint{{7.f, 1.5f, 7.f}, -1},
         };
     }
     return out;
 }
 
 void Engine::spawnWaveEnemies(int count) {
-    std::vector<glm::vec3> spots = waveSpawnPositions();
+    std::vector<SpawnPoint> spots = waveSpawnPositions();
     if (spots.empty())
         return;
     // Round-robin across the available spawn points so larger waves still fan
-    // out across the arena instead of stacking on one corner. Archetype varies
-    // by wave + index so later waves field Chargers and Ranged enemies too.
-    for (int i = 0; i < count; ++i)
-        spawnEnemy(spots[i % spots.size()], m_enemyAlbedo, m_enemySampler, archetypeForWave(m_wave.wave, i));
+    // out across the arena instead of stacking on one corner. A spawn point
+    // with an archetype hint (e.g. a Lua level's per-room enemy mix) always
+    // spawns that archetype; otherwise archetype varies by wave + index so
+    // later waves field Chargers and Ranged enemies too.
+    for (int i = 0; i < count; ++i) {
+        const SpawnPoint& spot = spots[i % spots.size()];
+        EnemyArchetype archetype =
+            spot.archetypeHint >= 0 ? static_cast<EnemyArchetype>(spot.archetypeHint) : archetypeForWave(m_wave.wave, i);
+        spawnEnemy(spot.position, m_enemyAlbedo, m_enemySampler, archetype);
+    }
 }
 
 void Engine::respawnPlayer() {

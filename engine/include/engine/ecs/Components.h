@@ -79,6 +79,13 @@ struct EnemyComponent {
 
 struct SpawnPoint {
     glm::vec3 position{};
+    // Optional archetype override (mirrors EnemyArchetype's int value:
+    // 0=Grunt, 1=Charger, 2=Ranged); -1 means "no hint", so
+    // Engine::spawnWaveEnemies falls back to its default wave/index-based
+    // archetypeForWave() selection. Set from a level's SpawnPointRecord.flags
+    // bits 1-2 (LevelFormat.h) — e.g. a Lua level script's
+    // ds.level.add_spawn(pos, false, archetype) call.
+    int archetypeHint = -1;
 };
 
 // A physics-simulated debris chunk spawned on enemy death (task 36 ragdoll/gibs).

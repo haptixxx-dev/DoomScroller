@@ -55,9 +55,10 @@ TEST_CASE("WeaponComponent cooldown tracks fire rate correctly", "[components]")
     REQUIRE(w.cooldown == Catch::Approx(0.f).margin(1e-6f)); // ready to fire
 }
 
-TEST_CASE("SpawnPoint default position is origin", "[components]") {
+TEST_CASE("SpawnPoint default position is origin and archetypeHint is unset", "[components]") {
     SpawnPoint sp;
     REQUIRE(sp.position == glm::vec3(0.f));
+    REQUIRE(sp.archetypeHint == -1);
 }
 
 TEST_CASE("HealthComponent default values", "[components]") {

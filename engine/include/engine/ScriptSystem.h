@@ -156,7 +156,11 @@ class ScriptSystem {
         // wires up for the duration of running scripts/level.lua.
         std::function<void(glm::vec3 center, glm::vec3 halfExtents, glm::vec3 color)> levelAddBox;
         std::function<void(const std::string& meshPath, glm::vec3 position, glm::quat rotation)> levelAddMesh;
-        std::function<void(glm::vec3 position, bool isPlayerStart)> levelAddSpawn;
+        // archetypeHint mirrors EnemyArchetype's int value (0=Grunt, 1=Charger,
+        // 2=Ranged); -1 means "no hint", so the engine falls back to its
+        // default wave/index-based archetype selection. Always -1 for the
+        // player-start spawn (isPlayerStart == true).
+        std::function<void(glm::vec3 position, bool isPlayerStart, int archetypeHint)> levelAddSpawn;
         std::function<void(glm::vec3 position, glm::vec3 color, float radius, float intensity)> levelAddLight;
 
         CameraCallbacks camera;
@@ -293,7 +297,7 @@ class ScriptSystem {
     void invokeSpawnProjectile(const glm::vec3& origin, const glm::vec3& velocity, int damage, uint32_t ownerBodyId);
     void invokeLevelAddBox(glm::vec3 center, glm::vec3 halfExtents, glm::vec3 color);
     void invokeLevelAddMesh(const std::string& meshPath, glm::vec3 position, glm::quat rotation);
-    void invokeLevelAddSpawn(glm::vec3 position, bool isPlayerStart);
+    void invokeLevelAddSpawn(glm::vec3 position, bool isPlayerStart, int archetypeHint);
     void invokeLevelAddLight(glm::vec3 position, glm::vec3 color, float radius, float intensity);
 
   private:

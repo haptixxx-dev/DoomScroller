@@ -226,8 +226,12 @@ void LevelLoader::populate(const LevelData& data, entt::registry& world, Physics
                 *playerStart = pos;
             continue;
         }
+        // bits 1-2: archetype hint, 0 = unset (-1), else EnemyArchetype value + 1.
+        uint32_t archetypeBits = (sp.flags >> 1) & 0x3u;
+        int archetypeHint      = archetypeBits == 0u ? -1 : static_cast<int>(archetypeBits) - 1;
+
         auto e = world.create();
-        world.emplace<SpawnPoint>(e, SpawnPoint{pos});
+        world.emplace<SpawnPoint>(e, SpawnPoint{pos, archetypeHint});
     }
 
     // Light records (task 42): one LightComponent entity per record. No
