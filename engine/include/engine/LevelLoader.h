@@ -27,8 +27,11 @@ struct MeshRecord {
 // LevelData is the in-memory form of a parsed .dslv file: the header plus the
 // record blocks. Used by both the runtime loader and the offline converter
 // tool (LevelLoader::write / LevelLoader::read), and by Lua-driven procedural
-// level generation (engine/LevelGen.h), which builds a LevelData in memory
-// without ever serializing it.
+// level generation (engine/LevelGen.h's generateLevelFromLua), which builds
+// a LevelData's boxes/spawns/lights in memory without ever serializing it —
+// note `meshes` specifically is NOT populated by the Lua path: ds.level.
+// add_mesh pieces go through a separate LevelGen::LuaMeshPlacement list
+// instead, loaded fresh via MeshLoader rather than baked into a MeshRecord.
 struct LevelData {
     LevelHeader header{};
     std::vector<BoxRecord> boxes;

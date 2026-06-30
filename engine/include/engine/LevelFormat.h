@@ -96,14 +96,16 @@ struct LightRecord {
 };
 
 // Static mesh geometry header (v2+): real (non-box) collision + render mesh,
-// baked offline from a glTF source by tools/level_convert, or accumulated at
-// runtime from Lua-placed mesh pieces (engine/LevelGen.h) — though the latter
-// never round-trips through this on-disk form, it reuses the same in-memory
-// shape (see LevelLoader.h's MeshRecord). Geometry is stored in LOCAL space;
-// `position`/`rotation` place it in world space, mirroring BoxRecord's
-// center/halfExtents split. No scale field: non-uniform scale is rejected at
-// convert time and uniform scale is baked directly into the vertex positions,
-// keeping PhysicsWorld::addStaticMesh's signature scale-free.
+// baked offline from a glTF source by tools/level_convert (see LevelLoader.h's
+// MeshRecord for the in-memory form). Lua-placed mesh pieces
+// (ds.level.add_mesh, engine/LevelGen.h) are a SEPARATE runtime-only path —
+// they load fresh every run via MeshLoader and never populate a MeshRecord or
+// touch this on-disk format at all (see LevelGen.h's LuaMeshPlacement).
+// Geometry here is stored in LOCAL space; `position`/`rotation` place it in
+// world space, mirroring BoxRecord's center/halfExtents split. No scale
+// field: non-uniform scale is rejected at convert time and uniform scale is
+// baked directly into the vertex positions, keeping
+// PhysicsWorld::addStaticMesh's signature scale-free.
 //
 // On disk, this fixed-size header is immediately followed by `vertexCount`
 // Vertex entries and then `indexCount` uint32_t indices (see LevelLoader.cpp
