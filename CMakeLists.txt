@@ -47,6 +47,10 @@ set(ENABLE_INSTALL       OFF CACHE BOOL "" FORCE)
 set(OVERRIDE_CXX_FLAGS   OFF CACHE BOOL "" FORCE)
 set(ENABLE_ALL_WARNINGS  OFF CACHE BOOL "" FORCE)
 set(FLOATING_POINT_EXCEPTIONS_ENABLED OFF CACHE BOOL "" FORCE)
+# Jolt defaults to the static MSVC runtime (/MT); every other target (SDL3,
+# mimalloc, the executables) uses CMake's default dynamic runtime (/MD). The
+# mismatch fails linking on Windows (LNK2038). Align Jolt to the dynamic runtime.
+set(USE_STATIC_MSVC_RUNTIME_LIBRARY OFF CACHE BOOL "" FORCE)
 add_subdirectory(extern/JoltPhysics/Build Jolt)
 
 # ---------------------------------------------------------------------------
@@ -97,6 +101,8 @@ endif()
 ds_compile_slang(
     SOURCES   ${CMAKE_SOURCE_DIR}/shaders/triangle.slang
               ${CMAKE_SOURCE_DIR}/shaders/mesh.slang
+              ${CMAKE_SOURCE_DIR}/shaders/particle.slang
+              ${CMAKE_SOURCE_DIR}/shaders/ui.slang
     STAGES    vertex fragment
     TARGETS   ${_shader_targets}
     OUT_DIR   "${_shader_out}"
@@ -114,6 +120,7 @@ add_subdirectory(extern/catch2)
 # ---------------------------------------------------------------------------
 add_subdirectory(engine)
 add_subdirectory(game)
+add_subdirectory(tools)
 
 enable_testing()
 add_subdirectory(tests)

@@ -137,24 +137,232 @@ Fast-paced 3D FPS. Doom / ULTRAKILL / HyperDemon style. Arena combat, aggressive
 - [x] Fix: push constants `register(b0)` (SDL3 Metal vert uniform = buffer 0)
 - [x] Fix: shutdown malloc crash (force-load mimalloc `__interpose` on macOS)
 - [x] `engine_math` test target + `ds_engine_tests` (Transform/Camera/component math)
+- [x] Player health + i-frames (`HealthComponent`, pure `applyDamage` helper, enemy contact damage on cooldown, death + auto-respawn via `PhysicsWorld::setPosition`)
+- [x] Audio (`AudioSystem` PIMPL over miniaudio: SFX/music buses, decoded-sound cache, 2D/3D one-shots, camera listener, looping music, safe no-op on missing files)
+- [x] HUD / UI overlay (`UISystem` immediate-mode batcher: crosshair, health bar, weapon/wave readouts, damage flash + low-health pulse, YOU DIED banner, embedded 8x8 bitmap font, built-in white texture)
+- [x] VFX / particle system (pooled CPU `ParticleSystem` + free list, `particle.slang` instanced camera-facing billboards, alpha + additive pipelines, muzzle/blood/spark/explosion presets)
+- [x] Dynamic lights (`LightComponent`, forward up-to-16 point lights in `mesh.slang` via fragment push constants, std140 `LightBuffer`/`GpuLight`, decaying transient lights + `spawnTransientLight()`, muzzle-flash light)
+- [x] Movement tech (accel/decel ground+air model, dash with charge bank + i-frames, slide via eye-offset drop, `MovementTuning` + pure `MovementTech.h` math, Shift=dash / Ctrl=slide)
+- [x] Projectile weapons + switching (`ProjectileComponent`, `WeaponType` loadout, `ProjectileSystem` manual integration + ray-cast hit + splash falloff, 1..N / wheel switching, impact callback wires VFX/light/audio)
+- [x] Wave spawner + game state (`GameState` machine, pure `WaveSystem` score/combo, `HighScore` persistence, wave -> intermission -> next loop, Menu/Dead/Victory overlays, spawn from `SpawnPoint`s)
+- [x] Level format + loader (versioned `DSLV` binary, `LevelLoader` read/write/load into ECS + physics, `tools/level_convert` stub, `arena.dslv`, round-trip tests, `buildArena` fallback)
+- [x] Lua scripting hooks (`ScriptSystem` owns `lua_State`, sandboxed stdlib, manual-bound `ds` table spawn/get/set/emit/wave-config, data-driven enemy stats + wave layout from `waves.lua`, `onWaveStart`/`onEnemyDeath`/`onPlayerDeath` callbacks)
+- [x] Fix: Windows `LNK2038` runtime mismatch (`USE_STATIC_MSVC_RUNTIME_LIBRARY OFF` aligns Jolt's `/MT` to the project-wide dynamic `/MD`; first green Windows build since Jolt was first linked into an exe)
+- [x] CI hygiene: pin to `clang-format` 18 (ubuntu-latest's version), `clang-tidy` narrowing/member-init clean — see `CLAUDE.md` "CI / toolchain gotchas"
 
 ### Next (in order)
 
-Loop is closed (move, shoot, kill). Phase 2 = make it a *game* that feels good:
-two-way combat, feedback (audio/UI/VFX), movement tech, content pipeline.
+Phase 2 (tasks 11-20) is **done** - two-way combat, audio/UI/VFX feedback, movement
+tech, projectiles, waves/state, level format, and Lua hooks all landed green.
+
+Phase 3 (tasks 21-45) = push to a shippable vertical slice: a real multi-pass
+renderer (HDR/PBR/shadows/bloom), deeper ULTRAKILL-style game feel and content,
+and the tooling/infra (settings, save, input, cook, editor, packaging) around it.
+
+### Phase 3 (tasks 21-45)
 
 | # | Task | Depends on | Key deliverable |
 |---|------|-----------|-----------------|
-| 11 | **Player health + enemy attacks** | - | Enemies deal damage, player health, death + respawn; two-way combat |
-| 12 | **Audio (miniaudio)** | - | `AudioSystem`, spatial SFX (shots/hits/death), music bus, volume |
-| 13 | **HUD / UI overlay** | 11 | 2D pass: crosshair, health/ammo, enemy count, damage flash |
-| 14 | **VFX / particle system** | - | Instanced billboards: muzzle flash, blood, impact sparks, explosions |
-| 15 | **Dynamic lights** | 14 | Multi-light forward, point lights, muzzle-flash + explosion light |
-| 16 | **Movement tech** | 11 | Dash (i-frames), slide, air control; ULTRAKILL/HyperDemon feel |
-| 17 | **Projectile weapons + switching** | 14 | Rocket/plasma (travel + splash), weapon slots, per-weapon stats |
-| 18 | **Wave spawner + game state** | 11, 13 | State machine (menu/play/dead), wave system, score, win/lose |
-| 19 | **Level format + loader** | - | Custom binary level, converter tool stub, load arena from file |
-| 20 | **Lua scripting hooks** | 18 | Bind spawn/wave/event API, data-drive enemy stats + wave config |
+| 21 | **Offscreen HDR target + tonemap** | - | Scene -> RGBA16F target, fullscreen `tonemap.slang` (ACES/Reinhard + exposure) -> swapchain before UI |
+| 22 | **RHI hot-reload shader path** | - | DS_DEV `.slang` filesystem watcher -> `slangc` recompile -> in-place pipeline reissue |
+| 23 | **Render graph / frame-pass scheduler** | 21 | Declarative pass list (inputs/outputs, load/store, record lambda), transient RT alloc; migrate scene/particle/HUD/tonemap |
+| 24 | **CPU frustum culling** | - | 6 view-proj planes (pure, tested) + mesh AABBs, skip off-screen draws in `renderSystem` |
+| 25 | **Camera juice: shake + recoil + hitstop** | - | Pure tested `GameFeel.h` trauma shake, additive recoil, hitstop `m_dt` scale; driven by fire/hit/kill |
+| 26 | **Bloom + final post stack** | 23 | Bright-pass + separable Gaussian down/up chain (`post.slang`), additive composite in tonemap, tunables |
+| 27 | **PBR metallic-roughness materials** | 21 | Cook-Torrance GGX in `mesh.slang`, albedo/MR/normal textures (cgltf), feeds point-light loop + HDR |
+| 28 | **GPU-instanced static & enemy batching** | 24 | Group identical mesh+material into one `drawIndexed` with per-instance model-matrix binding |
+| 29 | **Damage numbers + hitmarkers** | 25 | Hit/kill events -> world-to-screen floating damage numbers + crosshair hitmarker / kill-confirm |
+| 30 | **Enemy archetypes + AI variants** | - | `EnemyArchetype` (Grunt/Charger/Ranged) data-driven fields, FSM branches, Lua-weighted spawns |
+| 31 | **Sun shadow map (single cascade)** | 23, 27 | Depth-only pass into D32F from sun light-space matrix, PCF sample in `mesh.slang` |
+| 32 | **ULTRAKILL style/rank meter** | 29 | Decaying style score (variety/air/dash/multi-kills) -> D..SSS rank, HUD bar; pure tested math |
+| 33 | **Pickups: health / ammo / dash orbs** | 30 | `PickupComponent` + proximity `pickupSystem`, spinning billboards, audio/VFX cues, drop on kill |
+| 34 | **RHICaps tier detection + quality profile** | 26, 31 | Populate caps (VRAM/mesh-shader/bindless), pick Minimum vs Enhanced profile toggling graph passes |
+| 35 | **Parry + dash-cancel** | 30, 32 | Parry window negates damage + reflects Ranged projectile + refunds dash; dash-cancels recovery; tested timing |
+| 36 | **Ragdoll / death-gib feedback** | 25 | `PhysicsWorld::addDynamicBox`/`removeBody`, impulse-launched gib + blood/explosion emit, timed despawn |
+| 37 | **Weapon alt-fire + upgrade modifiers** | 33 | Right-mouse alt-fire variants + stackable `WeaponUpgrade` multipliers granted at intermission, HUD readout |
+| 38 | **Settings store + user-dir resolver** | - | `ds::paths::userDir()` (SDL_GetPrefPath) + versioned `SettingsStore` (gfx/audio/input), tested parse/serialize |
+| 39 | **GPU compute particle simulation** | 34 | `IRHICommandList::dispatch` + `compMain` particle integration into instance buffer; Enhanced-tier, CPU fallback |
+| 40 | **Boss encounter with phased AI** | 30, 35 | `BossComponent` + `bossSystem` multi-phase volleys/charges/vulnerable windows as final wave, boss health bar |
+| 41 | **Rebindable input + gamepad** | 38 | `InputMap` action->scancode/button (pure tested) + SDL_Gamepad analog move/look, deadzone, persisted via settings |
+| 42 | **Text level parser + data-driven placement** | - | Parser for text/Lua level desc -> `.dslv` in `level_convert`; consume `SpawnPoint.flags` + `LightRecord` in loader |
+| 43 | **Texture cook tool + .dstex BC7** | - | `tools/asset_cook` (stb + BC7enc) -> versioned `.dstex`; `TextureManager` + `TextureFormat::BC7Unorm` load path, DS_DEV RGBA8 fallback |
+| 44 | **Settings/rebind menu + audio buses + feedback layer** | 32, 35, 41 | UISystem settings/pause sub-screen (sliders/toggles/rebind capture), named mix buses + ducking, SFX/VFX for new mechanics |
+| 45 | **CI expansion + packaging** | 42, 43 | CI builds tools, runs cook + all ctest suites + format/tidy gating + artifacts; CPack per-OS installers staging cooked assets |
+
+#### Task 21 - Offscreen HDR target + tonemap pass
+- Render the 3D scene into an RGBA16F color target (`createTexture` render-target) + existing depth
+- Add a fullscreen `tonemap.slang` pass (Reinhard/ACES + exposure) resolving HDR -> swapchain BGRA8
+- Runs before UI/HUD so overlay stays LDR and crisp
+- Establishes the multi-pass scaffold every later effect hangs off
+- Carries forward task-14 followup: HDR target enables real glow for muzzle/plasma/explosions
+
+#### Task 22 - RHI hot-reload shader path (DS_DEV)
+- Filesystem watcher over `shaders/` via `ds::paths::shaderSources()`
+- On change, invoke `slangc` to recompile the affected `.slang`
+- Rebuild affected pipelines in place via a small pipeline registry / `createPipeline` reissue
+- DS_DEV only, compiled-out no-op in shipping
+- Realizes the "Hot-reload (future)" item in the shader-pipeline decided section
+
+#### Task 23 - Render graph / frame-pass scheduler
+- Lightweight pass list: name, RHITexture inputs/outputs, load/store ops, record lambda into `IRHICommandList`
+- Owns transient render-target allocation and pass ordering
+- Migrate scene / particle / HUD / tonemap passes onto it
+- Centralizes attachment wiring so shadows / bloom slot in declaratively
+- Foundation for tasks 26 (bloom), 31 (shadows), 34 (tier toggles)
+
+#### Task 24 - CPU frustum culling
+- Extract camera's 6 view-proj planes (pure, testable in `engine_math`)
+- Add AABBs to `MeshComponent` (or a new `BoundsComponent`)
+- `renderSystem` skips Transform+Mesh draws fully outside the frustum
+- Catch2 plane-extraction + AABB-vs-frustum test
+- Cheap win on the i5 min tier as level/enemy counts grow
+
+#### Task 25 - Camera juice: screenshake + recoil + hitstop
+- Pure `engine/include/engine/GameFeel.h` (unit-tested like `MovementTech`)
+- Decaying-trauma screenshake (deterministic noise, no mid-frame RNG seeding)
+- Additive recoil pitch/yaw offsets; hitstop timer scaling `m_dt`
+- Engine applies shake/recoil to camera before building viewProj in `render()`
+- Trauma from `fireWeapon()` / player-hit; hitstop on kill/explosion (respects existing `.05` `m_dt` clamp)
+
+#### Task 26 - Bloom + final post stack
+- Bright-pass threshold + separable Gaussian downsample/upsample chain (`post.slang`) reading the HDR target
+- Composited additively in the tonemap pass
+- Intensity / threshold exposed as tunables
+- Gives muzzle flashes, plasma, and explosions real glow
+- Slots into the render graph as a dedicated pass group
+
+#### Task 27 - PBR metallic-roughness materials
+- Extend `MaterialComponent` + `mesh.slang` to Cook-Torrance metallic-roughness (GGX + Smith + Fresnel)
+- Read albedo / metallic-roughness / normal textures (cgltf already parses PBR)
+- Feeds the existing point-light loop, output to the HDR target
+- Replaces the Lambertian + hardcoded-sun lighting
+- Keeps the directional sun term for the shadow task to shadow
+
+#### Task 28 - GPU-instanced static & enemy batching
+- Group identical mesh+material entities (arena tiles, enemy boxes, projectiles) into one `drawIndexed`
+- Per-instance model-matrix vertex binding (`VertexBinding.instanced=true` already exists)
+- Replaces the one-draw-per-entity loop in `RenderSystem`
+- Cuts draw-call count for large waves on the min tier
+- Builds on the culling pass (only batch what survives the frustum test)
+
+#### Task 29 - Damage numbers + hitmarker feedback
+- Surface a damage event on each enemy-health subtraction (hitscan `castRay`, projectile direct/splash)
+- Engine turns events into UISystem world-to-screen floating damage numbers
+- Brief crosshair hitmarker flash + a distinct kill-confirm marker
+- Reuses `UISystem::drawText`/`drawQuad` and `m_camera` viewProj for projection
+- Pairs with task-25 juice for satisfying hit feedback
+
+#### Task 30 - Enemy archetypes via data-driven EnemyComponent + AI variants
+- `EnemyArchetype` enum + per-type fields on `EnemyComponent` (Grunt melee, Charger rush, Ranged shooter)
+- Branch the FSM in `EnemySystem`: Ranged fires a `ProjectileComponent` at range; Charger telegraphed lunge
+- Spawn weights flow from Lua `waves.lua` / `ScriptEnemyStats` (designer-tunable, no code)
+- Carries forward task-20 followup: enrich the script-driven enemy stat plumbing
+- Foundation for pickups (33), parry (35), boss (40), difficulty (45/curve)
+
+#### Task 31 - Sun shadow map (single directional cascade)
+- Depth-only shadow pass rendering scene into a D32Float texture from the sun's light-space matrix
+- Sample with PCF in `mesh.slang` to shadow the directional term
+- One cascade sized for the arena
+- Requires the render graph to own the extra depth pass
+- Builds on PBR so the shadowed term is the same directional light
+
+#### Task 32 - ULTRAKILL-style style/rank meter
+- Extend `WaveState` (or sibling pure `StyleSystem` in `WaveSystem.h`) with a decaying style score
+- Rewards variety: weapon-switch kills, airborne kills, dash-kills, splash multi-kills
+- Maps to letter ranks D..SSS; HUD renders rank + bar top-right alongside COMBO
+- Pure math kept testable; fed kill-context flags (combo, weapon type, airborne, dashedThisFrame)
+- Consumes the damage/kill events surfaced in task 29
+
+#### Task 33 - Pickups: health, ammo, and dash-charge orbs
+- `PickupComponent {kind, value}` + `pickupSystem` proximity check (reuse `PhysicsWorld::getPosition`, no new Jolt query)
+- Effects: heal `HealthComponent`, refill weapon ammo, grant a PlayerController dash charge
+- Spawns a small spinning billboard/box mesh, fires existing audio/VFX cues
+- Wave spawner drops them on enemy death via the kill loop
+- Tunable drop rates routed through the archetype/Lua data
+
+#### Task 34 - RHICaps tier detection + auto quality profile
+- Populate `RHICaps` (deviceVRAMBytes, meshShaders, bindless) from SDL3/native queries at device creation
+- Pick Minimum (GTX 1060: bloom-lite, no shadows, half-res post) vs Enhanced (full stack)
+- Toggle render-graph passes per profile
+- Implements the PLAN's runtime tier selection
+- Depends on bloom + shadows existing so there are passes to gate
+
+#### Task 35 - Parry + dash-cancel mechanic
+- Treat a melee/parry input during an enemy Attack/projectile window as a parry
+- Negate incoming damage, reflect a Ranged enemy's `ProjectileComponent` (flip velocity, swap owner), refund a dash charge
+- Dash-cancel lets a dash interrupt slide/recovery
+- Parry timing window added to `MovementTuning` (pure, tested) + a HUD parry-flash
+- Depends on archetypes (reflectable projectiles) and the style meter (parry rewards style)
+
+#### Task 36 - Ragdoll / death-gib feedback on enemy kill
+- On enemy death, convert into short-lived dynamic Jolt bodies (min: impulse-launched box) + blood/explosion emit
+- New `PhysicsWorld::addDynamicBox` + the long-noted-missing `PhysicsWorld::removeBody` for cleanup
+- Carries forward task-18 followup: removeBody also cleans orphaned enemy capsules on wave clear/restart
+- Keeps RHI box-mesh rendering; bodies despawn on a timer to bound count for low-end tiers
+- Driven by the same kill loop and juice as tasks 25/29
+
+#### Task 37 - Weapon alt-fire + upgrade modifiers
+- Extend `WeaponComponent` with a right-mouse alt-fire variant (shotgun spread, charged rocket, plasma overheat)
+- Stackable `WeaponUpgrade` set (damage / firerate / splash multipliers) applied in `fireWeapon()` / spawn
+- Upgrades granted between waves (intermission choice), shown in HUD weapon readout
+- Builds on pickups/intermission economy
+- Feeds the difficulty curve's upgrade-offer cadence (task 45-curve work)
+
+#### Task 38 - Settings store + Paths user-dir resolver
+- Add `ds::paths::userDir()` (SDL_GetPrefPath)
+- `SettingsStore` serializes graphics / audio / input config to versioned settings file under it
+- Loaded at Engine construction before device/audio init
+- Pure parse/serialize logic in a header-only piece testable via `engine_headers`
+- Foundation for input rebind (41) and the settings menu / buses (44)
+
+#### Task 39 - RHI compute dispatch + GPU particle simulation
+- Add `IRHICommandList::dispatch` + a compute pass type (`ShaderStage::Compute` + Storage buffers already exist)
+- Move ParticleSystem integration to a `compMain` in `particle.slang` writing the instance buffer on-GPU
+- Removes the per-frame synchronous `uploadImmediate` stall noted in task 14
+- Enhanced tier only; CPU path stays as fallback (gated by the tier profile)
+- Carries forward task-14 followup on the synchronous particle re-upload
+
+#### Task 40 - Boss encounter with phased AI
+- `BossComponent {phase, phaseHealthThresholds, attackPattern}` + `bossSystem`
+- Multi-phase fight: telegraphed projectile volleys (reuse `ProjectileSystem`), charge attacks, parryable vulnerable window
+- Spawned as the final wave when `m_wave` reaches maxWaves instead of immediate Victory
+- HUD boss health bar; defeat transitions to Victory
+- Depends on archetypes (AI building blocks) and parry (vulnerable-window design)
+
+#### Task 41 - Rebindable input + gamepad support
+- `InputMap` action enum -> SDL scancode / mouse-button, queried by `processEvents`/`update` instead of hardcoded keys
+- Defaults + serialization through `SettingsStore` so bindings persist; action-resolution factored pure for tests
+- Extend to SDL_Gamepad axes/buttons (open in Engine ctor, handle add/remove)
+- Analog move/look into PlayerController + dash/slide/fire actions, deadzone + look-sensitivity tunables
+- Carries forward task-16 followup: PlayerController input now flows through the map
+
+#### Task 42 - Text level description + level_convert parser
+- Replace `level_convert`'s hardcoded `buildArenaLevel` with a parser for a simple text/Lua level description (boxes, spawns with player-start flag, lights) emitting `.dslv`
+- Consume `SpawnPointRecord.flags` + `LightRecord` in `LevelLoader` so player start and `LightComponent`s come from data
+- Carries forward task-19 followups: stop relying on Engine spawn/light constants
+- Carries forward task-15 followup: data-driven `LightComponent` placement
+- Read spawn points back to position player/enemies
+
+#### Task 43 - Texture cook tool + .dstex BC7 format
+- `tools/asset_cook` loads source PNGs (stb), generates mips, BC7-compresses (bc7enc / ispc-texcomp as a new extern), writes versioned `.dstex`
+- Extend `TextureManager` to load `.dstex` and upload BCn via new `TextureFormat::BC7Unorm` in RHITypes + SDL3 backend
+- DS_DEV: fall back to runtime stb RGBA8 when a cooked `.dstex` is absent; shipping requires cooked
+- Gate the BC7 path on RHICaps so GTX 1060-tier and Metal both get a valid format
+- Document the cook step in a tools README
+
+#### Task 44 - Settings/rebind menu + audio buses + new-mechanic feedback
+- UISystem settings/pause sub-screen on the Menu GameState: volume + look-sensitivity sliders, toggles, "press a key" rebind capture writing back through `SettingsStore`
+- Surface AudioSystem's SFX/music buses as named volumes driven by settings + a UI bus + music ducking on YOU DIED/Victory
+- Wire the audio/VFX gaps flagged in the digest: explosion SFX, parry chime, pickup cue, rank-up sting, footsteps from PlayerController movement state
+- Add missing asset path constants; rely on AudioSystem's safe no-op-on-missing behavior
+- Depends on settings store + input rebind + gamepad; consumes style (32), parry (35), pickups (33) events
+
+#### Task 45 - Save system, CI expansion, and per-OS packaging
+- Generalize `HighScore` into a versioned binary `SaveData` blob (best wave, unlocks, run stats, settings ref) under `userDir()` with magic+version+CRC; round-trip + version-reject tests
+- Extend `ci.yml`: build tools (`level_convert`, `asset_cook`), run the cook step, run all three ctest suites `--output-on-failure`, gate clang-format/clang-tidy, upload per-OS artifacts; add a headless smoke target constructing pure systems without a GPU
+- CPack (or scripts): Windows installer/zip, macOS `.app` (Metal shaders + Info.plist), Linux tarball/AppImage
+- Each stages binary + cooked assets + compiled shaders into the binary-relative layout `ds::paths` expects in shipping mode
+- Depends on the cook tool + text level parser so CI/packaging have real cooked assets to stage
 
 #### Task 11 - Player health + enemy attacks
 - `HealthComponent` (current/max); attach to player entity

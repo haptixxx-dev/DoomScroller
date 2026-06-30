@@ -41,8 +41,8 @@ class IRHIDevice {
     // Immediate upload helper (syncs on completion — use for init only)
     // -----------------------------------------------------------------------
     virtual void uploadImmediate(RHIBuffer dst, const void* data, uint64_t size, uint64_t dstOffset = 0) = 0;
-    virtual void uploadImmediateTexture(RHITexture dst, const void* data, uint64_t size,
-                                        uint32_t width, uint32_t height, uint32_t mipLevel = 0)         = 0;
+    virtual void uploadImmediateTexture(RHITexture dst, const void* data, uint64_t size, uint32_t width,
+                                        uint32_t height, uint32_t mipLevel = 0)                          = 0;
 
     // -----------------------------------------------------------------------
     // Capabilities

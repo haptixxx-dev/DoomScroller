@@ -7,7 +7,9 @@ namespace ds {
 
 TextureManager::TextureManager(rhi::IRHIDevice& device) : m_device(device) {}
 
-TextureManager::~TextureManager() { destroyAll(); }
+TextureManager::~TextureManager() {
+    destroyAll();
+}
 
 rhi::RHITexture TextureManager::load(const std::filesystem::path& path) {
     std::string key = path.string();
@@ -28,7 +30,7 @@ rhi::RHITexture TextureManager::load(const std::filesystem::path& path) {
 }
 
 rhi::RHITexture TextureManager::createFromMemory(const uint8_t* rgba, uint32_t width, uint32_t height,
-                                                  const char* debugName) {
+                                                 const char* debugName) {
     rhi::TextureDesc desc{};
     desc.width     = width;
     desc.height    = height;

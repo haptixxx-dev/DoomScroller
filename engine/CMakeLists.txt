@@ -15,6 +15,8 @@ target_link_libraries(engine_headers INTERFACE glm::glm EnTT::EnTT)
 # Pure-math subset for headless unit tests (Camera, no SDL3/Tracy/Jolt/mimalloc)
 add_library(engine_math STATIC
     src/Camera.cpp
+    src/ParticleSystem.cpp
+    src/WaveSystem.cpp
 )
 target_include_directories(engine_math PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
@@ -31,11 +33,20 @@ add_library(engine STATIC
     src/TextureManager.cpp
     src/MeshLoader.cpp
     src/PhysicsWorld.cpp
+    src/LevelLoader.cpp
     src/PlayerController.cpp
+    src/ParticleSystem.cpp
+    src/WaveSystem.cpp
+    src/HighScore.cpp
+    src/UISystem.cpp
+    src/AudioSystem.cpp
+    src/ScriptSystem.cpp
+    src/miniaudio_impl.cpp
     src/cgltf_impl.cpp
     src/stb_impl.cpp
     src/ecs/RenderSystem.cpp
     src/ecs/EnemySystem.cpp
+    src/ecs/ProjectileSystem.cpp
     src/rhi/sdl3/SDL3Device.cpp
 )
 
@@ -47,7 +58,7 @@ target_include_directories(engine
         ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 
-target_link_libraries(engine PUBLIC SDL3::SDL3-static TracyClient mimalloc-static glm::glm EnTT::EnTT stb cgltf Jolt)
+target_link_libraries(engine PUBLIC SDL3::SDL3-static TracyClient mimalloc-static glm::glm EnTT::EnTT stb cgltf Jolt miniaudio lua_static)
 
 target_compile_definitions(engine PUBLIC GLM_FORCE_DEPTH_ZERO_TO_ONE)
 

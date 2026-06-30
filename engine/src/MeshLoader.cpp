@@ -1,8 +1,8 @@
 #include "engine/MeshLoader.h"
+
 #include "engine/Vertex.h"
 
 #include <cgltf.h>
-
 #include <stdexcept>
 #include <vector>
 
@@ -88,17 +88,17 @@ std::vector<MeshComponent> load(rhi::IRHIDevice& device, const std::string& path
                 std::vector<uint32_t> indices(idxCount);
                 for (cgltf_size ii = 0; ii < idxCount; ++ii)
                     indices[ii] = static_cast<uint32_t>(cgltf_accessor_read_index(idxAcc, ii));
-                ibDesc.size     = idxCount * sizeof(uint32_t);
-                mc.indexType    = rhi::IndexType::Uint32;
-                mc.indexBuffer  = device.createBuffer(ibDesc);
+                ibDesc.size    = idxCount * sizeof(uint32_t);
+                mc.indexType   = rhi::IndexType::Uint32;
+                mc.indexBuffer = device.createBuffer(ibDesc);
                 device.uploadImmediate(mc.indexBuffer, indices.data(), ibDesc.size);
             } else {
                 std::vector<uint16_t> indices(idxCount);
                 for (cgltf_size ii = 0; ii < idxCount; ++ii)
                     indices[ii] = static_cast<uint16_t>(cgltf_accessor_read_index(idxAcc, ii));
-                ibDesc.size     = idxCount * sizeof(uint16_t);
-                mc.indexType    = rhi::IndexType::Uint16;
-                mc.indexBuffer  = device.createBuffer(ibDesc);
+                ibDesc.size    = idxCount * sizeof(uint16_t);
+                mc.indexType   = rhi::IndexType::Uint16;
+                mc.indexBuffer = device.createBuffer(ibDesc);
                 device.uploadImmediate(mc.indexBuffer, indices.data(), ibDesc.size);
             }
 

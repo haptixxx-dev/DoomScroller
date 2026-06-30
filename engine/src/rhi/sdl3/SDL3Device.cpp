@@ -20,8 +20,8 @@ static void sdlCheck(bool ok, const char* msg) {
 // ---------------------------------------------------------------------------
 SDL3Device::SDL3Device(SDL_Window* window) : m_window(window) {
 #if defined(DS_DEV)
-    m_gpu = SDL_CreateGPUDevice(SDL_GPU_SHADERFORMAT_SPIRV | SDL_GPU_SHADERFORMAT_MSL | SDL_GPU_SHADERFORMAT_DXIL,
-                                true, nullptr);  // debug_mode=true catches validation errors
+    m_gpu = SDL_CreateGPUDevice(SDL_GPU_SHADERFORMAT_SPIRV | SDL_GPU_SHADERFORMAT_MSL | SDL_GPU_SHADERFORMAT_DXIL, true,
+                                nullptr); // debug_mode=true catches validation errors
 #else
     m_gpu = SDL_CreateGPUDevice(SDL_GPU_SHADERFORMAT_SPIRV | SDL_GPU_SHADERFORMAT_MSL | SDL_GPU_SHADERFORMAT_DXIL,
                                 false, nullptr);
@@ -420,8 +420,8 @@ void SDL3Device::uploadImmediate(RHIBuffer dst, const void* data, uint64_t size,
     SDL_ReleaseGPUTransferBuffer(m_gpu, tb);
 }
 
-void SDL3Device::uploadImmediateTexture(RHITexture dst, const void* data, uint64_t size,
-                                        uint32_t width, uint32_t height, uint32_t mipLevel) {
+void SDL3Device::uploadImmediateTexture(RHITexture dst, const void* data, uint64_t size, uint32_t width,
+                                        uint32_t height, uint32_t mipLevel) {
     SDL_GPUTransferBufferCreateInfo tbInfo{};
     tbInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
     tbInfo.size  = static_cast<uint32_t>(size);
@@ -460,8 +460,8 @@ void SDL3Device::uploadImmediateTexture(RHITexture dst, const void* data, uint64
 void SDL3Device::debugDownloadTexture(RHITexture tex, uint32_t w, uint32_t h, const char* path) {
     const uint32_t bytes = w * h * 4;
     SDL_GPUTransferBufferCreateInfo tbInfo{};
-    tbInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD;
-    tbInfo.size  = bytes;
+    tbInfo.usage              = SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD;
+    tbInfo.size               = bytes;
     SDL_GPUTransferBuffer* tb = SDL_CreateGPUTransferBuffer(m_gpu, &tbInfo);
     sdlCheck(tb != nullptr, "debug CreateGPUTransferBuffer");
 
@@ -469,7 +469,9 @@ void SDL3Device::debugDownloadTexture(RHITexture tex, uint32_t w, uint32_t h, co
     SDL_GPUCopyPass* copy     = SDL_BeginGPUCopyPass(cmd);
     SDL_GPUTextureRegion region{};
     region.texture = static_cast<SDL_GPUTexture*>(tex.ptr);
-    region.w = w; region.h = h; region.d = 1;
+    region.w       = w;
+    region.h       = h;
+    region.d       = 1;
     SDL_GPUTextureTransferInfo dst{};
     dst.transfer_buffer = tb;
     dst.pixels_per_row  = w;
@@ -484,7 +486,7 @@ void SDL3Device::debugDownloadTexture(RHITexture tex, uint32_t w, uint32_t h, co
     sdlCheck(mapped != nullptr, "debug MapGPUTransferBuffer");
     const uint8_t* px = static_cast<const uint8_t*>(mapped);
 
-    bool isBGRA = (SDL_GetGPUSwapchainTextureFormat(m_gpu, m_window) == SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM);
+    bool isBGRA      = (SDL_GetGPUSwapchainTextureFormat(m_gpu, m_window) == SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM);
     SDL_IOStream* io = SDL_IOFromFile(path, "wb");
     if (io) {
         char header[64];
@@ -492,9 +494,15 @@ void SDL3Device::debugDownloadTexture(RHITexture tex, uint32_t w, uint32_t h, co
         SDL_WriteIO(io, header, hn);
         std::vector<uint8_t> rgb(w * h * 3);
         for (uint32_t i = 0; i < w * h; ++i) {
-            uint8_t r = px[i*4+0], g = px[i*4+1], b = px[i*4+2];
-            if (isBGRA) { uint8_t t = r; r = b; b = t; }
-            rgb[i*3+0] = r; rgb[i*3+1] = g; rgb[i*3+2] = b;
+            uint8_t r = px[i * 4 + 0], g = px[i * 4 + 1], b = px[i * 4 + 2];
+            if (isBGRA) {
+                uint8_t t = r;
+                r         = b;
+                b         = t;
+            }
+            rgb[i * 3 + 0] = r;
+            rgb[i * 3 + 1] = g;
+            rgb[i * 3 + 2] = b;
         }
         SDL_WriteIO(io, rgb.data(), rgb.size());
         SDL_CloseIO(io);
