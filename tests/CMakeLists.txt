@@ -2,8 +2,14 @@ add_executable(ds_tests
     test_rhi_types.cpp
     test_level_format.cpp
     test_level_parser.cpp
+    test_gltf_extract.cpp
+    ${CMAKE_SOURCE_DIR}/engine/src/GltfExtract.cpp
+    ${CMAKE_SOURCE_DIR}/engine/src/cgltf_impl.cpp
 )
-target_link_libraries(ds_tests PRIVATE engine_headers Catch2::Catch2WithMain)
+target_link_libraries(ds_tests PRIVATE engine_headers cgltf Catch2::Catch2WithMain)
+# Lets test_gltf_extract.cpp parse the real fixture files under tests/fixtures/
+# instead of embedding glTF JSON as a giant string literal.
+target_compile_definitions(ds_tests PRIVATE DS_FIXTURES_DIR="${CMAKE_SOURCE_DIR}/tests/fixtures")
 add_test(NAME ds_tests COMMAND ds_tests)
 
 # Pure math + component tests: no SDL3/Tracy/mimalloc/Jolt in test process

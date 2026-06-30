@@ -33,6 +33,7 @@ add_library(engine STATIC
     src/ShaderWatcher.cpp
     src/TextureManager.cpp
     src/MeshLoader.cpp
+    src/GltfExtract.cpp
     src/PhysicsWorld.cpp
     src/LevelLoader.cpp
     src/PlayerController.cpp
