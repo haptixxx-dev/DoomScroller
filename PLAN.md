@@ -178,6 +178,8 @@ RHI was designed for.
 
 ### Phase 4 (tasks 46-58)
 
+**Execution order: A (46-48) -> 49 -> D (51-54) -> C (55-58), packaging (50) last.**
+
 Ordered by dependency/risk. Wave A is a prerequisite for the rest: you cannot
 tune or trust Phase 3's unseen render work without a way to see it, and a
 screenshot-diff harness turns every later render change into a regression test.
