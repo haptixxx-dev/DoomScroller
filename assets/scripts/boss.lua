@@ -1,3 +1,4 @@
+--- @file
 -- Boss phase/attack-pattern logic (port of engine/include/engine/BossLogic.h's
 -- bossPhaseForHealth plus the inline attack-pattern selection/cadence that
 -- used to live in Engine::bossSystem). ds.boss is global, single-instance
@@ -14,6 +15,7 @@ ds.boss = {
 
 local thresholds = { 0.66, 0.33, 0.0 }
 
+--- Resets phase/timers/pattern to a fresh boss spawn's defaults.
 function ds.boss.reset()
     ds.boss.phase = 0
     ds.boss.vulnerable_timer = 0
@@ -38,12 +40,19 @@ local function phase_for_health(current, max_health)
     return phase
 end
 
--- boss_pos, player_pos: Vec3 userdata. Returns new_phase, new_vulnerable_timer,
--- new_pattern so the caller can detect a phase transition (phase > previous,
--- for its own VFX/audio cue) and a fire event (pattern changed, since pattern
--- only increments when a volley/burst actually fires) to play the weapon-fire
--- cue. Gates 2x damage during the vulnerable window. Fires pellets itself via
+--- Per-frame boss phase/attack tick. The caller detects a phase transition by
+-- comparing the returned phase against the previous one (for its own VFX/
+-- audio cue) and a fire event by comparing pattern (it only increments when
+-- a volley/burst actually fires) to play the weapon-fire cue. Gates 2x damage
+-- during the vulnerable window. Fires pellets itself via
 -- ds.spawn_projectile(origin, velocity, damage, owner_body_id).
+-- @param health current boss HP
+-- @param max_health boss max HP
+-- @param dt frame delta time in seconds
+-- @param boss_pos ds.Vec3 boss world position
+-- @param player_pos ds.Vec3 player world position
+-- @param boss_body_id physics body id, passed through to spawned projectiles
+-- @return integer new_phase, number new_vulnerable_timer, integer new_pattern
 function ds.boss.tick(health, max_health, dt, boss_pos, player_pos, boss_body_id)
     -- Phase transition: opens a brief parryable vulnerable window and bumps
     -- the attack cadence. Falls through (not an early return) so a freshly

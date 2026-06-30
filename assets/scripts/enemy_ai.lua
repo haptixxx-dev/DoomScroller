@@ -1,3 +1,4 @@
+--- @file
 -- Per-enemy stat overrides (Grunt only today), read back via
 -- ScriptSystem::enemyStats().
 ds.enemy_stats = {
@@ -20,12 +21,25 @@ ds.enemy_ai = {}
 local ARCHETYPE_GRUNT, ARCHETYPE_CHARGER, ARCHETYPE_RANGED = 0, 1, 2
 local STATE_IDLE, STATE_CHASE, STATE_ATTACK = 0, 1, 2
 
--- Returns: new_state, set_velocity(bool), move_intent(-1..1 along the
--- already-computed direction to the player; speed = chargeSpeed if lunge
--- else moveSpeed), lunge(bool), fire_projectile(bool), melee_attack(bool),
--- arm_windup(bool). attack_cooldown is the CALLER-decremented cooldown (the
--- dt subtraction already happened in EnemySystem.cpp, matching the original
--- C++ flow); this function only reads it, never decrements it further.
+--- Per-frame FSM tick for one enemy. attack_cooldown is the CALLER-decremented
+-- cooldown (the dt subtraction already happened in EnemySystem.cpp, matching
+-- the original C++ flow); this function only reads it, never decrements it
+-- further.
+-- @param archetype 0=Grunt 1=Charger 2=Ranged (mirrors EnemyArchetype)
+-- @param state 0=Idle 1=Chase 2=Attack (mirrors EnemyComponent::State)
+-- @param dist current distance to the player
+-- @param attack_cooldown caller-decremented attack cooldown remaining
+-- @param move_speed this archetype's movement speed
+-- @param attack_range distance at which the archetype transitions to Attack
+-- @param detection_range distance at which Idle transitions to Chase
+-- @param attack_interval seconds between attacks once in range
+-- @param charge_windup Charger-only telegraph duration before a lunge
+-- @param charge_speed Charger-only lunge speed
+-- @return integer new_state,
+--   boolean set_velocity,
+--   number move_intent (-1..1 along the already-computed direction to the
+--     player; speed = charge_speed if lunge else move_speed),
+--   boolean lunge, boolean fire_projectile, boolean melee_attack, boolean arm_windup
 function ds.enemy_ai.tick(archetype, state, dist, attack_cooldown, move_speed, attack_range, detection_range,
                            attack_interval, charge_windup, charge_speed)
     local ranged = archetype == ARCHETYPE_RANGED
@@ -82,8 +96,11 @@ function ds.enemy_ai.tick(archetype, state, dist, attack_cooldown, move_speed, a
     end
 end
 
--- Deterministic archetype pick for a wave-spawned enemy: wave 1 is all
+--- Deterministic archetype pick for a wave-spawned enemy: wave 1 is all
 -- Grunts; from wave 2 mix in Chargers; from wave 3 add Ranged.
+-- @param wave 1-based wave number
+-- @param spawn_index index of this spawn within the wave
+-- @return integer archetype (0=Grunt 1=Charger 2=Ranged)
 function ds.enemy_ai.archetype_for_wave(wave, spawn_index)
     if wave <= 1 then
         return ARCHETYPE_GRUNT

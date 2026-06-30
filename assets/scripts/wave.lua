@@ -1,3 +1,4 @@
+--- @file
 -- Wave progression + scoring (port of engine/src/WaveSystem.cpp's five pure
 -- functions, plus the intermission-arming/spawn-bookkeeping orchestration
 -- that used to live inline in Engine::updateWaves). ds.wave.state is the live
@@ -31,8 +32,10 @@ ds.wave = {
     },
 }
 
--- Enemy count for a given 1-based wave, escalating by enemies_per_wave each
+--- Enemy count for a given 1-based wave, escalating by enemies_per_wave each
 -- wave and clamped to max_enemies_per_wave. Out-of-range waves spawn nothing.
+-- @param wave 1-based wave number
+-- @return integer enemy count for this wave (0 if wave < 1)
 function ds.wave.enemies_for_wave(wave)
     if wave < 1 then
         return 0
@@ -41,14 +44,16 @@ function ds.wave.enemies_for_wave(wave)
     return math.min(count, ds.wave.config.max_enemies_per_wave)
 end
 
--- Points for a single kill given the combo count *after* the kill is
+--- Points for a single kill given the combo count *after* the kill is
 -- registered (combo == 1 for the first kill in a chain).
+-- @param combo combo count after this kill
+-- @return integer points awarded for this kill
 function ds.wave.score_for_kill(combo)
     local mult = combo > 0 and combo or 1
     return ds.wave.config.kill_score * mult
 end
 
--- Registers one enemy kill: advances kill count, combo (resetting the
+--- Registers one enemy kill: advances kill count, combo (resetting the
 -- window), best combo, total score, and decrements alive_enemies.
 function ds.wave.register_kill()
     local s = ds.wave.state
@@ -62,7 +67,8 @@ function ds.wave.register_kill()
     end
 end
 
--- Advances combo/intermission/survival timers by dt.
+--- Advances combo/intermission/survival timers by dt.
+-- @param dt frame delta time in seconds
 function ds.wave.tick(dt)
     local s = ds.wave.state
     s.time_survived = s.time_survived + dt
@@ -83,7 +89,7 @@ function ds.wave.tick(dt)
     end
 end
 
--- Begins the next wave: increments the wave number and flags spawn_pending,
+--- Begins the next wave: increments the wave number and flags spawn_pending,
 -- or marks the run cleared once max_waves is exceeded. Always clears the
 -- intermission-armed state (advancing always means the wait is over).
 function ds.wave.advance()
@@ -98,7 +104,7 @@ function ds.wave.advance()
     s.spawn_pending = true
 end
 
--- Resets all wave + score state for a fresh run.
+--- Resets all wave + score state for a fresh run.
 function ds.wave.reset()
     ds.wave.state = {
         wave = 0,
@@ -116,22 +122,24 @@ function ds.wave.reset()
     }
 end
 
--- Keeps alive_enemies in sync with the world's live EnemyComponent count
+--- Keeps alive_enemies in sync with the world's live EnemyComponent count
 -- (kills are also decremented in register_kill; this guards against any
 -- external destruction, e.g. the boss-clear path).
+-- @param n live EnemyComponent count this frame
 function ds.wave.set_alive(n)
     ds.wave.state.alive_enemies = n
 end
 
--- Arms the intermission countdown to the next wave (first clear frame).
+--- Arms the intermission countdown to the next wave (first clear frame).
 function ds.wave.arm_intermission()
     ds.wave.state.intermission = ds.wave.config.intermission_time
     ds.wave.state.intermission_armed = true
 end
 
--- Records that the just-spawned wave's enemies are live and clears
+--- Records that the just-spawned wave's enemies are live and clears
 -- spawn_pending. Called right after the engine spawns enemies_for_wave(wave)
 -- enemies.
+-- @param alive_count enemy count just spawned for this wave
 function ds.wave.mark_spawned(alive_count)
     ds.wave.state.alive_enemies = alive_count
     ds.wave.state.spawn_pending = false

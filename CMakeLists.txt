@@ -146,3 +146,18 @@ add_subdirectory(tools)
 
 enable_testing()
 add_subdirectory(tests)
+
+# ---------------------------------------------------------------------------
+# Docs (optional): the ds.* Lua API reference, docs/Doxyfile. Not built by
+# default or by `all`; only exists when Doxygen is found, so a missing local
+# install never breaks a normal build.
+# ---------------------------------------------------------------------------
+find_package(Doxygen QUIET)
+if(DOXYGEN_FOUND)
+    add_custom_target(docs
+        COMMAND ${DOXYGEN_EXECUTABLE} ${CMAKE_SOURCE_DIR}/docs/Doxyfile
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+        COMMENT "Generating ds.* Lua API docs (docs/generated/html/index.html)"
+        VERBATIM
+    )
+endif()

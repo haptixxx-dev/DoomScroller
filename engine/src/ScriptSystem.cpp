@@ -34,7 +34,14 @@ ScriptSystem* selfFromState(lua_State* L) {
 
 // --- ds.* binding trampolines ------------------------------------------------
 
-// ds.spawn_enemy(x, y, z [, type]) -> entity id
+/** ds.spawn_enemy(x, y, z [, type]) -> entity id
+ *  Spawns an enemy entity at world position (x, y, z).
+ *  @param x world-space spawn position x
+ *  @param y world-space spawn position y
+ *  @param z world-space spawn position z
+ *  @param type optional archetype hint (0=Grunt 1=Charger 2=Ranged), default 0
+ *  @return integer the spawned entity's id
+ */
 int l_spawn_enemy(lua_State* L) {
     ScriptSystem* self = selfFromState(L);
     float x            = static_cast<float>(luaL_checknumber(L, 1));
@@ -48,6 +55,12 @@ int l_spawn_enemy(lua_State* L) {
     return 1;
 }
 
+/** ds.get_field(entity, field) -> number
+ *  Reads a numeric field off an entity (e.g. health, ammo) by name.
+ *  @param entity entity id
+ *  @param field field name to read
+ *  @return number the field's current value (0 if the entity/field is missing)
+ */
 int l_get_field(lua_State* L) {
     ScriptSystem* self = selfFromState(L);
     uint32_t entity    = static_cast<uint32_t>(luaL_checkinteger(L, 1));
@@ -59,6 +72,12 @@ int l_get_field(lua_State* L) {
     return 1;
 }
 
+/** ds.set_field(entity, field, value)
+ *  Writes a numeric field on an entity by name.
+ *  @param entity entity id
+ *  @param field field name to write
+ *  @param value new value
+ */
 int l_set_field(lua_State* L) {
     ScriptSystem* self = selfFromState(L);
     uint32_t entity    = static_cast<uint32_t>(luaL_checkinteger(L, 1));
@@ -69,6 +88,11 @@ int l_set_field(lua_State* L) {
     return 0;
 }
 
+/** ds.emit_event(name [, value])
+ *  Fires a named gameplay event with an optional numeric payload.
+ *  @param name event name
+ *  @param value optional numeric payload, default 0
+ */
 int l_emit_event(lua_State* L) {
     ScriptSystem* self = selfFromState(L);
     const char* name   = luaL_checkstring(L, 1);
@@ -78,8 +102,13 @@ int l_emit_event(lua_State* L) {
     return 0;
 }
 
-// ds.spawn_projectile(origin, velocity, damage, owner_body_id) -> spawns an
-// enemy/boss-owned projectile entity (used by boss.lua's attack patterns).
+/** ds.spawn_projectile(origin, velocity, damage, owner_body_id) — spawns an
+ *  enemy/boss-owned projectile entity (used by boss.lua's attack patterns).
+ *  @param origin ds.Vec3 world-space spawn position
+ *  @param velocity ds.Vec3 initial velocity
+ *  @param damage damage the projectile deals on hit
+ *  @param owner_body_id firing entity's physics body id (so it can't hit itself)
+ */
 int l_spawn_projectile(lua_State* L) {
     ScriptSystem* self   = selfFromState(L);
     glm::vec3* origin    = ds::lua::checkUserdata<glm::vec3>(L, 1);
@@ -91,9 +120,14 @@ int l_spawn_projectile(lua_State* L) {
     return 0;
 }
 
-// ds.level.add_box(center, half_extents, color) — accumulates a box into the
-// level-gen LevelData (engine/LevelGen.h). Silently no-ops outside a level-gen
-// run, since Callbacks::levelAddBox is unset on the main gameplay ScriptSystem.
+/** ds.level.add_box(center, half_extents, color) — accumulates a box into the
+ *  level-gen LevelData (engine/LevelGen.h). Silently no-ops outside a
+ *  level-gen run, since Callbacks::levelAddBox is unset on the main gameplay
+ *  ScriptSystem.
+ *  @param center ds.Vec3 world-space box center
+ *  @param half_extents ds.Vec3 half-size along each axis
+ *  @param color ds.Vec3 vertex tint (rgb, 0..1)
+ */
 int l_level_add_box(lua_State* L) {
     ScriptSystem* self = selfFromState(L);
     glm::vec3* center  = ds::lua::checkUserdata<glm::vec3>(L, 1);
@@ -104,10 +138,15 @@ int l_level_add_box(lua_State* L) {
     return 0;
 }
 
-// ds.level.add_mesh(path, position [, euler_degrees]) — euler_degrees is an
-// optional Vec3 of Euler angles in degrees (ergonomic for level authors,
-// who think in degrees, not quaternions); converted here so the C++
-// callback stays in proper glm::quat form.
+/** ds.level.add_mesh(path, position [, euler_degrees]) — places a glTF mesh
+ *  piece with real collision (see GltfExtract.h) at runtime. euler_degrees is
+ *  an optional Vec3 of Euler angles in degrees (ergonomic for level authors,
+ *  who think in degrees, not quaternions); converted here so the C++
+ *  callback stays in proper glm::quat form.
+ *  @param path glTF file path, relative to the assets directory
+ *  @param position ds.Vec3 world-space placement
+ *  @param euler_degrees optional ds.Vec3 rotation in degrees, default (0,0,0)
+ */
 int l_level_add_mesh(lua_State* L) {
     ScriptSystem* self = selfFromState(L);
     const char* path   = luaL_checkstring(L, 1);
@@ -120,27 +159,38 @@ int l_level_add_mesh(lua_State* L) {
     return 0;
 }
 
-// ds.level.add_spawn(position, is_player [, archetype]) — archetype is an
-// optional int (0=Grunt, 1=Charger, 2=Ranged) hinting which enemy type this
-// spawn should favor; omit (or nil) for the engine's default wave/index-based
-// selection. Ignored when is_player is true.
+/** ds.level.add_spawn(position, is_player [, archetype]) — registers a spawn
+ *  point: the player start (is_player true) or an enemy spawn (is_player
+ *  false). archetype is an optional int (0=Grunt, 1=Charger, 2=Ranged)
+ *  hinting which enemy type this spawn should favor; omit (or nil) for the
+ *  engine's default wave/index-based selection. Ignored when is_player is true.
+ *  @param position ds.Vec3 world-space spawn position
+ *  @param is_player true for the player start, false for an enemy spawn
+ *  @param archetype optional enemy archetype hint (0=Grunt 1=Charger 2=Ranged)
+ */
 int l_level_add_spawn(lua_State* L) {
     ScriptSystem* self = selfFromState(L);
-    glm::vec3* pos      = ds::lua::checkUserdata<glm::vec3>(L, 1);
-    bool isPlayer       = lua_toboolean(L, 2) != 0;
-    int archetypeHint   = lua_isnoneornil(L, 3) ? -1 : static_cast<int>(luaL_checkinteger(L, 3));
+    glm::vec3* pos     = ds::lua::checkUserdata<glm::vec3>(L, 1);
+    bool isPlayer      = lua_toboolean(L, 2) != 0;
+    int archetypeHint  = lua_isnoneornil(L, 3) ? -1 : static_cast<int>(luaL_checkinteger(L, 3));
     if (self && self->state())
         self->invokeLevelAddSpawn(*pos, isPlayer, archetypeHint);
     return 0;
 }
 
-// ds.level.add_light(position, color, radius, intensity)
+/** ds.level.add_light(position, color, radius, intensity) — places a point
+ *  light entity in the generated level.
+ *  @param position ds.Vec3 world-space light position
+ *  @param color ds.Vec3 light color (rgb, 0..1)
+ *  @param radius falloff radius in world units
+ *  @param intensity scalar brightness
+ */
 int l_level_add_light(lua_State* L) {
     ScriptSystem* self = selfFromState(L);
-    glm::vec3* pos      = ds::lua::checkUserdata<glm::vec3>(L, 1);
-    glm::vec3* color    = ds::lua::checkUserdata<glm::vec3>(L, 2);
-    float radius        = static_cast<float>(luaL_checknumber(L, 3));
-    float intensity     = static_cast<float>(luaL_checknumber(L, 4));
+    glm::vec3* pos     = ds::lua::checkUserdata<glm::vec3>(L, 1);
+    glm::vec3* color   = ds::lua::checkUserdata<glm::vec3>(L, 2);
+    float radius       = static_cast<float>(luaL_checknumber(L, 3));
+    float intensity    = static_cast<float>(luaL_checknumber(L, 4));
     if (self && self->state())
         self->invokeLevelAddLight(*pos, *color, radius, intensity);
     return 0;
@@ -192,7 +242,7 @@ void ScriptSystem::invokeEmit(std::string_view name, double value) {
 }
 
 void ScriptSystem::invokeSpawnProjectile(const glm::vec3& origin, const glm::vec3& velocity, int damage,
-                                          uint32_t ownerBodyId) {
+                                         uint32_t ownerBodyId) {
     if (m_callbacks.spawnProjectile)
         m_callbacks.spawnProjectile(origin, velocity, damage, ownerBodyId);
 }
@@ -379,7 +429,7 @@ bool ScriptSystem::callModuleFunction(const char* moduleField, const char* fn, i
     // Stack on entry: nargs args already pushed on top.
     lua_getglobal(m_state, "ds");
     lua_getfield(m_state, -1, moduleField);
-    lua_remove(m_state, -2); // ds; stack: args..., module
+    lua_remove(m_state, -2);         // ds; stack: args..., module
     if (!lua_istable(m_state, -1)) {
         lua_pop(m_state, 1 + nargs); // module (non-table) + args
         for (int i = 0; i < nresults; ++i)
@@ -387,7 +437,7 @@ bool ScriptSystem::callModuleFunction(const char* moduleField, const char* fn, i
         return false;
     }
     lua_getfield(m_state, -1, fn);
-    lua_remove(m_state, -2); // module table; stack: args..., fn
+    lua_remove(m_state, -2);         // module table; stack: args..., fn
     if (!lua_isfunction(m_state, -1)) {
         lua_pop(m_state, 1 + nargs); // fn (non-function) + args
         for (int i = 0; i < nresults; ++i)

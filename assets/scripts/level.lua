@@ -1,7 +1,10 @@
+--- @file
 -- Procedural multi-room level: 2-4 rooms in a row, connected by open
 -- doorways, each room favoring a different enemy archetype. Randomized every
 -- run (Lua 5.4 auto-seeds math.random per-state, so this varies in shipping
--- builds too, no os.time() needed).
+-- builds too, no os.time() needed). Defines no ds.* functions itself --
+-- consumes the ds.level.* procedural-generation API (see ScriptSystem.cpp's
+-- l_level_add_box/add_mesh/add_spawn/add_light for that API's docs).
 
 local H, T = 5, 0.1
 local D = 7 + math.random(0, 4) -- shared room depth (half-extent): every room

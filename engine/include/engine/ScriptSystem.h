@@ -2,11 +2,10 @@
 
 #include "engine/WaveSystem.h"
 
-#include <glm/glm.hpp>
-#include <glm/gtc/quaternion.hpp>
-
 #include <cstdint>
 #include <functional>
+#include <glm/glm.hpp>
+#include <glm/gtc/quaternion.hpp>
 #include <string>
 #include <string_view>
 
@@ -194,29 +193,53 @@ class ScriptSystem {
     // outside DS_DEV or if no file was loaded.
     bool reload();
 
-    // Reads the ds.enemy_stats table (if the config defined it) into a plain
-    // struct. The returned struct's `overrode` flag is false when the script
-    // provided nothing, so the engine keeps its hardcoded defaults.
+    /** Reads the ds.enemy_stats table (if the config defined it) into a plain
+     *  struct. The returned struct's `overrode` flag is false when the script
+     *  provided nothing, so the engine keeps its hardcoded defaults.
+     *  @return the parsed (or default-fallback) enemy stat overrides
+     */
     ScriptEnemyStats enemyStats() const;
 
-    // Invoke optional Lua global event callbacks. Each looks up the named global
-    // function; if absent or not callable it is silently skipped. Errors raised
-    // inside the callback are caught (pcall) and logged, never propagated.
+    /** @name Optional Lua global event callbacks
+     *  Each looks up the named global function (onWaveStart / onEnemyDeath /
+     *  onPlayerDeath, see assets/scripts/hooks.lua); if absent or not callable
+     *  it is silently skipped. Errors raised inside the callback are caught
+     *  (pcall) and logged, never propagated.
+     */
+    ///@{
+    /// @param wave the wave number that just started
     void onWaveStart(int wave);
+    /// @param entity the killed enemy's entity id
+    /// @param x world-space death position x
+    /// @param y world-space death position y
+    /// @param z world-space death position z
     void onEnemyDeath(uint32_t entity, float x, float y, float z);
+    /// @param finalScore the run's final score
     void onPlayerDeath(int finalScore);
+    ///@}
 
     // --- Parry state machine (assets/scripts/parry.lua, module ds.parry). ---
     // Lua-side port of ParryTech.h's pure functions; Engine.cpp drives these
     // instead of calling the (now-unused-by-Engine) C++ free functions. Every
     // call is a no-op-friendly graceful fallback if parry.lua failed to load.
+
+    /// Resets ds.parry's window/cooldown timers to 0.
     void parryReset();
+    /// Starts a parry if off cooldown (ds.parry.trigger); a no-op while on cooldown.
     void parryTrigger();
+    /// Advances ds.parry's window/cooldown timers by dt. Call once per frame.
     void parryTick(float dt);
+    /// @return true while the parry window is open (incoming damage is negated this frame)
     bool parryActive() const;
+    /** Computes a reflected projectile velocity (ds.parry.reflect_velocity):
+     *  flips `incoming` and scales its magnitude by `speedBoost`.
+     *  @param incoming the incoming projectile's velocity
+     *  @param speedBoost multiplier applied to the flipped velocity (default 1.5x)
+     *  @return the reflected velocity
+     */
     glm::vec3 parryReflect(const glm::vec3& incoming, float speedBoost = 1.5f) const;
-    // Reads ds.parry.tuning.dash_refund; falls back to 1.f if parry.lua/the
-    // field is missing.
+    /// Reads ds.parry.tuning.dash_refund; falls back to 1.f if parry.lua/the
+    /// field is missing.
     float parryDashRefund() const;
 
     // --- Pickups (assets/scripts/pickups.lua, module ds.pickups). -----------
@@ -224,38 +247,75 @@ class ScriptSystem {
     // headroom-clamp decision; Engine.cpp still owns spawning the pickup
     // entity and applying the granted HP/ammo/dash-charge (component mutation
     // stays C++, per the migration brief).
+
+    /** Registers one enemy kill against ds.pickups's drop cadence
+     *  (ds.pickups.register_kill).
+     *  @return whether an orb should drop this kill, and which kind/value
+     */
     PickupDrop pickupRegisterKill();
+    /** Range + magnitude collection check (ds.pickups.collect_check).
+     *  @param playerPos player world position
+     *  @param pickupPos pickup world position
+     *  @param radius collection radius in world units
+     *  @param value full effect value the pickup grants
+     *  @param headroom remaining room for the effect (e.g. missing HP); clamps the grant
+     *  @return whether the pickup was collected, and the clamped grant amount
+     */
     PickupCollect pickupCollectCheck(const glm::vec3& playerPos, const glm::vec3& pickupPos, float radius, int value,
-                                      int headroom) const;
-    // Resets ds.pickups.kill_count (the drop-cadence counter) to 0; called on
-    // (re)start so wave-to-wave drop cadence doesn't carry over between runs.
+                                     int headroom) const;
+    /// Resets ds.pickups.kill_count (the drop-cadence counter) to 0; called on
+    /// (re)start so wave-to-wave drop cadence doesn't carry over between runs.
     void pickupsReset();
 
     // --- Wave progression (assets/scripts/wave.lua, module ds.wave). --------
     // Lua owns the live WaveState; readWaveState() pulls ds.wave.state back
     // into a WaveState for Engine.h/HUD/save code that reads m_wave.* fields
     // directly. Call it after any of the mutators below to refresh the cache.
+
+    /// Pulls ds.wave.state back into a WaveState; call after any mutator below.
     WaveState readWaveState() const;
+    /// Resets all of ds.wave's state for a fresh run (ds.wave.reset).
     void waveReset();
+    /// Advances ds.wave's combo/intermission/survival timers by dt (ds.wave.tick).
     void waveTick(float dt);
+    /// Registers one enemy kill against score/combo/kill-count (ds.wave.register_kill).
     void waveRegisterKill();
+    /// Begins the next wave, or marks the run cleared past the last wave (ds.wave.advance).
     void waveAdvance();
+    /** Enemy count for a given wave (ds.wave.enemies_for_wave).
+     *  @param wave 1-based wave number
+     *  @return enemy count for this wave (0 if wave < 1)
+     */
     int waveEnemiesForWave(int wave) const;
-    // Mirrors EnTT's live enemy count into ds.wave.state.alive_enemies.
+    /// Mirrors EnTT's live enemy count into ds.wave.state.alive_enemies.
     void waveSetAliveEnemies(int n);
-    // First clear frame: arms the intermission countdown to the next wave.
+    /// First clear frame: arms the intermission countdown to the next wave.
     void waveArmIntermission();
-    // Records that aliveCount enemies were just spawned and clears
-    // ds.wave.state.spawn_pending.
+    /// Records that aliveCount enemies were just spawned and clears
+    /// ds.wave.state.spawn_pending.
     void waveMarkSpawned(int aliveCount);
 
     // --- Boss (assets/scripts/boss.lua, module ds.boss). ---------------------
     // Lua owns phase-threshold computation and attack-pattern selection/
     // cadence (firing pellets itself via ds.spawn_projectile); Engine.cpp keeps
     // the EnTT/Jolt position sync and the entire death-handling block.
+
+    /// Resets ds.boss's phase/timers/pattern to a fresh boss spawn's defaults.
     void bossReset();
+    /** Per-frame boss phase/attack tick (ds.boss.tick). The caller detects a
+     *  phase transition by comparing the returned phase against the previous
+     *  one, and a fire event by comparing pattern (it only increments when a
+     *  volley/burst actually fires).
+     *  @param health current boss HP
+     *  @param maxHealth boss max HP
+     *  @param dt frame delta time in seconds
+     *  @param bossPos boss world position
+     *  @param playerPos player world position
+     *  @param bossBodyId physics body id, passed through to spawned projectiles
+     *  @return the new phase/vulnerable-timer/pattern
+     */
     BossTickResult bossTick(int health, int maxHealth, float dt, const glm::vec3& bossPos, const glm::vec3& playerPos,
-                             uint32_t bossBodyId);
+                            uint32_t bossBodyId);
 
     // --- Enemy AI (assets/scripts/enemy_ai.lua, module ds.enemy_ai). --------
     // Lua owns the FSM decision (state transitions, attack/lunge/fire timing);
@@ -263,11 +323,29 @@ class ScriptSystem {
     // decision (velocity, damage, projectile spawn — all C++-only state).
     // archetype/state are plain ints mirroring EnemyArchetype/
     // EnemyComponent::State so this stays decoupled from Components.h.
+
+    /** Per-frame FSM tick for one enemy (ds.enemy_ai.tick).
+     *  @param archetype 0=Grunt 1=Charger 2=Ranged (mirrors EnemyArchetype)
+     *  @param state 0=Idle 1=Chase 2=Attack (mirrors EnemyComponent::State)
+     *  @param dist current distance to the player
+     *  @param attackCooldown caller-decremented attack cooldown remaining
+     *  @param moveSpeed this archetype's movement speed
+     *  @param attackRange distance at which the archetype transitions to Attack
+     *  @param detectionRange distance at which Idle transitions to Chase
+     *  @param attackInterval seconds between attacks once in range
+     *  @param chargeWindup Charger-only telegraph duration before a lunge
+     *  @param chargeSpeed Charger-only lunge speed
+     *  @return the FSM's decision (new state, velocity/attack intents)
+     */
     EnemyAIDecision enemyAITick(int archetype, int state, float dist, float attackCooldown, float moveSpeed,
-                                 float attackRange, float detectionRange, float attackInterval, float chargeWindup,
-                                 float chargeSpeed);
-    // Deterministic archetype pick for a wave-spawned enemy (port of
-    // Engine::archetypeForWave); returns 0=Grunt, 1=Charger, 2=Ranged.
+                                float attackRange, float detectionRange, float attackInterval, float chargeWindup,
+                                float chargeSpeed);
+    /** Deterministic archetype pick for a wave-spawned enemy (ds.enemy_ai.archetype_for_wave;
+     *  port of Engine::archetypeForWave).
+     *  @param wave 1-based wave number
+     *  @param spawnIndex index of this spawn within the wave
+     *  @return archetype (0=Grunt, 1=Charger, 2=Ranged)
+     */
     int archetypeForWave(int wave, int spawnIndex) const;
 
     // Raw access for advanced callers / tests.

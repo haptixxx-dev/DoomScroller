@@ -27,6 +27,18 @@ Verification ceiling here = build green + ctest pass; don't try to run the binar
   SOURCES in the root `CMakeLists.txt`** or they won't compile/ship.
 - `tests/` — Catch2. Pure-logic tests link `engine_math` / `engine_headers` only
   (no SDL3/Jolt/mimalloc global state). Register in `tests/CMakeLists.txt`.
+- `docs/` — Doxygen reference for the `ds.*` Lua API (`docs/Doxyfile`). Build
+  with `cmake --build build/debug --target docs` (only exists if Doxygen is
+  installed; output → `docs/generated/html/index.html`, gitignored). Doxygen
+  doesn't parse Lua natively, so `docs/lua_doxygen_filter.py` rewrites
+  `assets/scripts/*.lua`'s `---`-prefixed doc comments into synthetic C++
+  declarations first. **New public `ds.<module>.fn(...)` Lua functions need a
+  `---`-prefixed doc block immediately above them** (`@param`/`@return` tags,
+  no blank line before the `function` line) to show up in the generated docs —
+  a plain `--` comment is treated as an ordinary code note and skipped. C++-
+  side Lua bindings with no Lua-side source (`ds.level.*`, `ds.Vec3`,
+  `ds.Global`) are documented directly with normal `/** */` Doxygen comments
+  in `ScriptSystem.cpp`'s `l_*` trampolines / `script/Lua*.h`.
 
 ## CI / toolchain gotchas (the "what the hell is happening")
 

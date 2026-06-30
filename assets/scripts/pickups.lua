@@ -1,3 +1,4 @@
+--- @file
 -- Pickup drop cadence + collection check (port of the logic that used to live
 -- inline in Engine::handleEnemyDeaths / Engine::pickupSystem, plus
 -- engine/include/engine/PickupSystem.h's withinPickupRange/
@@ -13,13 +14,14 @@ ds.pickups = {
     kill_count = 0,
 }
 
+--- Resets the kill-cadence counter to 0.
 function ds.pickups.reset()
     ds.pickups.kill_count = 0
 end
 
--- Deterministic cadence: every 3rd kill drops an orb, cycling kind so the
--- player sees all three over a run. No RNG state. Returns should_drop(bool),
--- kind(int), value(int).
+--- Deterministic cadence: every 3rd kill drops an orb, cycling kind so the
+-- player sees all three over a run. No RNG state.
+-- @return boolean should_drop, integer kind (0=Health 1=Ammo 2=DashCharge), integer value
 function ds.pickups.register_kill()
     ds.pickups.kill_count = ds.pickups.kill_count + 1
     if ds.pickups.kill_count % 3 ~= 0 then
@@ -53,7 +55,13 @@ local function effect_magnitude(value, headroom)
     return v < h and v or h
 end
 
--- Combined range + magnitude decision: returns collected(bool), grant(int).
+--- Combined range + magnitude decision.
+-- @param player_pos ds.Vec3 player world position
+-- @param pickup_pos ds.Vec3 pickup world position
+-- @param radius collection radius in world units
+-- @param value full effect value the pickup grants
+-- @param headroom remaining room for the effect (e.g. missing HP); clamps value
+-- @return boolean collected, integer grant amount
 function ds.pickups.collect_check(player_pos, pickup_pos, radius, value, headroom)
     if not within_range(player_pos, pickup_pos, radius) then
         return false, 0
