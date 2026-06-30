@@ -73,4 +73,39 @@ float ScriptSystem::parryDashRefund() const {
     return refund;
 }
 
+PickupDrop ScriptSystem::pickupRegisterKill() {
+    PickupDrop out{};
+    if (!m_state)
+        return out;
+    callModuleFunction("pickups", "register_kill", 0, 3);
+    out.drop  = lua_toboolean(m_state, -3) != 0;
+    out.kind  = static_cast<int>(lua_tointeger(m_state, -2));
+    out.value = static_cast<int>(lua_tointeger(m_state, -1));
+    lua_pop(m_state, 3);
+    return out;
+}
+
+PickupCollect ScriptSystem::pickupCollectCheck(const glm::vec3& playerPos, const glm::vec3& pickupPos, float radius,
+                                                int value, int headroom) const {
+    PickupCollect out{};
+    if (!m_state)
+        return out;
+    lua::pushUserdata<glm::vec3>(m_state, playerPos);
+    lua::pushUserdata<glm::vec3>(m_state, pickupPos);
+    lua_pushnumber(m_state, static_cast<lua_Number>(radius));
+    lua_pushinteger(m_state, value);
+    lua_pushinteger(m_state, headroom);
+    callModuleFunction("pickups", "collect_check", 5, 2);
+    out.collected = lua_toboolean(m_state, -2) != 0;
+    out.grant     = static_cast<int>(lua_tointeger(m_state, -1));
+    lua_pop(m_state, 2);
+    return out;
+}
+
+void ScriptSystem::pickupsReset() {
+    if (!m_state)
+        return;
+    callModuleFunction("pickups", "reset", 0, 0);
+}
+
 } // namespace ds

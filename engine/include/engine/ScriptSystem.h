@@ -25,6 +25,25 @@ struct ScriptEnemyStats {
     bool overrode = false; // true if the config actually set any of these
 };
 
+// Result of ds.pickups.register_kill() (assets/scripts/pickups.lua): whether
+// this kill's deterministic cadence drops a pickup, and if so which kind
+// (mirrors PickupComponent::Kind: 0=Health, 1=Ammo, 2=DashCharge) and face
+// value. Kept as a plain int rather than including ecs/Components.h so
+// ScriptSystem stays a standalone, ds_script_tests-testable unit.
+struct PickupDrop {
+    bool drop = false;
+    int kind  = 0;
+    int value = 0;
+};
+
+// Result of ds.pickups.collect_check(): whether the player is within range of
+// a pickup, and if so how much of its face value to actually grant (clamped
+// to headroom, e.g. missing HP).
+struct PickupCollect {
+    bool collected = false;
+    int grant      = 0;
+};
+
 struct ScriptWaveConfig {
     int baseEnemies        = 3;
     int enemiesPerWave     = 2;
@@ -148,6 +167,18 @@ class ScriptSystem {
     // Reads ds.parry.tuning.dash_refund; falls back to 1.f if parry.lua/the
     // field is missing.
     float parryDashRefund() const;
+
+    // --- Pickups (assets/scripts/pickups.lua, module ds.pickups). -----------
+    // Lua owns the drop-cadence/kind-cycling decision and the in-range +
+    // headroom-clamp decision; Engine.cpp still owns spawning the pickup
+    // entity and applying the granted HP/ammo/dash-charge (component mutation
+    // stays C++, per the migration brief).
+    PickupDrop pickupRegisterKill();
+    PickupCollect pickupCollectCheck(const glm::vec3& playerPos, const glm::vec3& pickupPos, float radius, int value,
+                                      int headroom) const;
+    // Resets ds.pickups.kill_count (the drop-cadence counter) to 0; called on
+    // (re)start so wave-to-wave drop cadence doesn't carry over between runs.
+    void pickupsReset();
 
     // Raw access for advanced callers / tests.
     lua_State* state() const { return m_state; }

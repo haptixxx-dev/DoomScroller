@@ -906,6 +906,13 @@ void Engine::initScripts() {
     std::filesystem::path parryScriptPath = paths::assets() / kParryScript;
     m_scripts.loadFile(parryScriptPath.string());
 
+    // Pickup drop cadence + collection decision (engine/include/engine/
+    // PickupSystem.h + the inline logic in handleEnemyDeaths/pickupSystem,
+    // ported to Lua). Missing/broken -> the wrappers below fall back to
+    // never-drop/never-collect rather than crashing.
+    std::filesystem::path pickupsScriptPath = paths::assets() / kPickupsScript;
+    m_scripts.loadFile(pickupsScriptPath.string());
+
     // Load the wave/enemy config; missing or broken -> keep hardcoded defaults.
     std::filesystem::path scriptPath = paths::assets() / kWaveScript;
     if (m_scripts.loadFile(scriptPath.string())) {
@@ -992,7 +999,7 @@ void Engine::startGame() {
     resetWave(m_wave);
     m_weaponIndex = 0;
     m_damageFlash = 0.f;
-    m_killCount   = 0;
+    m_scripts.pickupsReset();
 
     // Lifetime run counter (task 38): one run begins here. Persisted on the next
     // run-end via persistSave(); not flushed immediately to avoid a disk write
@@ -1309,27 +1316,12 @@ void Engine::handleEnemyDeaths() {
         enemy.physicsBodyId = UINT32_MAX;
 
         // Pickup drop (task 33): deterministic cadence — every 3rd kill drops an
-        // orb, cycling kind so the player sees all three over a run. No RNG state.
-        ++m_killCount;
-        if (m_killCount % 3 == 0) {
-            PickupComponent::Kind kind;
-            int value;
-            switch ((m_killCount / 3) % 3) {
-            case 0:
-                kind  = PickupComponent::Kind::Health;
-                value = 25;
-                break;
-            case 1:
-                kind  = PickupComponent::Kind::Ammo;
-                value = 30;
-                break;
-            default:
-                kind  = PickupComponent::Kind::DashCharge;
-                value = 1;
-                break;
-            }
+        // orb, cycling kind so the player sees all three over a run. Cadence/
+        // kind-cycling decision now lives in Lua (assets/scripts/pickups.lua).
+        PickupDrop drop = m_scripts.pickupRegisterKill();
+        if (drop.drop) {
             // Drop a little above the floor at the death site so it is reachable.
-            spawnPickup({center.x, 0.4f, center.z}, kind, value);
+            spawnPickup({center.x, 0.4f, center.z}, static_cast<PickupComponent::Kind>(drop.kind), drop.value);
         }
     }
 }
@@ -1381,13 +1373,14 @@ void Engine::pickupSystem(float dt) {
         // Spin the orb about Y for a little life, and bob it on a sine.
         transform.rotation = glm::angleAxis(m_timeAccum * 2.5f, glm::vec3{0.f, 1.f, 0.f});
 
-        if (!withinPickupRange(playerPos, transform.position, kPickupRadius))
+        PickupCollect cc = m_scripts.pickupCollectCheck(playerPos, transform.position, kPickupRadius, pickup.value,
+                                                          playerHealth.max - playerHealth.current);
+        if (!cc.collected)
             continue;
 
         switch (pickup.kind) {
         case PickupComponent::Kind::Health: {
-            int grant = pickupEffectMagnitude(pickup.value, playerHealth.max - playerHealth.current);
-            playerHealth.current += grant;
+            playerHealth.current += cc.grant;
             break;
         }
         case PickupComponent::Kind::Ammo: {

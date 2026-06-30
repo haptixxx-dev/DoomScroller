@@ -7,7 +7,6 @@
 #include "engine/GameFeel.h"
 #include "engine/ParticleSystem.h"
 #include "engine/PhysicsWorld.h"
-#include "engine/PickupSystem.h"
 #include "engine/PlayerController.h"
 #include "engine/QualityProfile.h"
 #include "engine/RenderGraph.h"
@@ -325,8 +324,9 @@ class Engine {
     // wave/enemy tuning back into m_waveConfig / m_enemyStats. Graceful fallback
     // to hardcoded defaults when the file is missing or errors.
     void initScripts();
-    static constexpr const char* kWaveScript  = "scripts/waves.lua";
-    static constexpr const char* kParryScript = "scripts/parry.lua";
+    static constexpr const char* kWaveScript    = "scripts/waves.lua";
+    static constexpr const char* kParryScript   = "scripts/parry.lua";
+    static constexpr const char* kPickupsScript = "scripts/pickups.lua";
     uint32_t m_playerBodyId                  = 0;
     std::unique_ptr<PlayerController> m_player;
 
@@ -361,8 +361,6 @@ class Engine {
     // player apply its effect (heal / refill ammo / dash charge), play a cue +
     // VFX, and destroy the entity (mesh auto-freed on_destroy).
     void pickupSystem(float dt);
-    // Running kill counter used for the deterministic pickup drop cadence.
-    int m_killCount = 0;
 
     // --- Boss (task 40). ---------------------------------------------------
     // Spawns the single boss entity (large box, high health, BossComponent) as

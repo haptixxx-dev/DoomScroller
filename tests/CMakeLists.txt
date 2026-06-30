@@ -36,7 +36,6 @@ add_executable(ds_engine_tests
     test_dstex.cpp
     test_quality.cpp
     test_userstorage.cpp
-    test_pickup.cpp
     test_boss.cpp
 )
 target_link_libraries(ds_engine_tests PRIVATE engine_math engine_headers Catch2::Catch2WithMain)
@@ -50,6 +49,7 @@ add_executable(ds_script_tests
     test_lua_vec3.cpp
     test_lua_global.cpp
     test_parry_lua.cpp
+    test_pickups_lua.cpp
     ${CMAKE_SOURCE_DIR}/engine/src/ScriptSystem.cpp
     ${CMAKE_SOURCE_DIR}/engine/src/ScriptSystemGameplay.cpp
     ${CMAKE_SOURCE_DIR}/engine/src/script/LuaUserdata.cpp
