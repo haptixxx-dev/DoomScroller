@@ -101,6 +101,11 @@ class ScriptSystem {
     // Raw access for advanced callers / tests.
     lua_State* state() const { return m_state; }
 
+    // Recovers the owning ScriptSystem* from a lua_State* (registry light-
+    // userdata lookup). Shared by every binding trampoline file (ScriptSystem's
+    // own + script/Lua*.cpp) so the lookup lives in exactly one place.
+    static ScriptSystem* fromState(lua_State* L);
+
     // Reads a global number by name; returns fallback if absent/non-numeric.
     // Convenience used by tests to validate the link + binding plumbing.
     double getGlobalNumber(const char* name, double fallback = 0.0) const;

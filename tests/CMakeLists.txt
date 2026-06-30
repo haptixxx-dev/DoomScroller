@@ -47,7 +47,10 @@ add_test(NAME ds_engine_tests COMMAND ds_engine_tests)
 # the test process avoids the full engine's Jolt/mimalloc global state.
 add_executable(ds_script_tests
     test_scripting.cpp
+    test_lua_vec3.cpp
     ${CMAKE_SOURCE_DIR}/engine/src/ScriptSystem.cpp
+    ${CMAKE_SOURCE_DIR}/engine/src/script/LuaUserdata.cpp
+    ${CMAKE_SOURCE_DIR}/engine/src/script/LuaVec3.cpp
 )
 target_link_libraries(ds_script_tests PRIVATE engine_headers lua_static SDL3::SDL3-static Catch2::Catch2WithMain)
 if(DS_DEV)

@@ -1,5 +1,7 @@
 #include "engine/ScriptSystem.h"
 
+#include "engine/script/LuaVec3.h"
+
 #include <SDL3/SDL_log.h>
 
 #include <lua.hpp>
@@ -13,12 +15,20 @@ namespace {
 // pattern for a unique light-userdata registry slot.
 char kSelfKey = 0;
 
-ScriptSystem* selfFromState(lua_State* L) {
+} // namespace
+
+ScriptSystem* ScriptSystem::fromState(lua_State* L) {
     lua_pushlightuserdata(L, &kSelfKey);
     lua_gettable(L, LUA_REGISTRYINDEX);
     auto* self = static_cast<ScriptSystem*>(lua_touserdata(L, -1));
     lua_pop(L, 1);
     return self;
+}
+
+namespace {
+
+ScriptSystem* selfFromState(lua_State* L) {
+    return ScriptSystem::fromState(L);
 }
 
 // --- ds.* binding trampolines ------------------------------------------------
@@ -158,6 +168,7 @@ bool ScriptSystem::init(const Callbacks& callbacks) {
     lua_pushlightuserdata(m_state, this);
     lua_settable(m_state, LUA_REGISTRYINDEX);
 
+    ds::lua::registerVec3(m_state);
     registerBindings();
     return true;
 }
