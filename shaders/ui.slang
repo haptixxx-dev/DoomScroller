@@ -28,12 +28,9 @@ struct PushConstants {
 [vk::binding(0, 1)]
 ConstantBuffer<PushConstants> gPush : register(b0);
 
-// Fragment texture+sampler slot 0: SPIRV set=2 binding=0, MSL texture(0)/sampler(0)
+// Fragment texture+sampler slot 0: SPIRV set=2 binding=0 as combined image sampler.
 [vk::binding(0, 2)]
-Texture2D<float4> gTex : register(t0, space2);
-
-[vk::binding(0, 2)]
-SamplerState gSampler : register(s0, space2);
+Sampler2D gTex;
 
 [shader("vertex")]
 VSOutput vertMain(VSInput v) {
@@ -48,6 +45,6 @@ VSOutput vertMain(VSInput v) {
 
 [shader("fragment")]
 float4 fragMain(VSOutput i) : SV_Target {
-    float4 tex = gTex.Sample(gSampler, i.uv);
+    float4 tex = gTex.Sample(i.uv);
     return tex * i.color;
 }
