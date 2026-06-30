@@ -136,8 +136,13 @@ TEST_CASE("the shipped assets/scripts/level.lua generates the expected counts", 
     REQUIRE(scripts.init(cb));
     REQUIRE(scripts.loadFile(std::string(DS_ASSETS_DIR) + "/scripts/level.lua"));
 
-    REQUIRE(boxCount == 6);
-    REQUIRE(spawnCount == 4);
+    // level.lua randomizes room size/pillar/spawn counts each run (Lua 5.4
+    // auto-seeds math.random per-state), so this asserts ranges rather than
+    // exact counts: 6 walls + 4..8 pillars, 1 player + 3..6 enemy spawns.
+    REQUIRE(boxCount >= 10);
+    REQUIRE(boxCount <= 14);
+    REQUIRE(spawnCount >= 4);
+    REQUIRE(spawnCount <= 7);
     REQUIRE(lightCount == 1);
     REQUIRE(sawPlayerSpawn);
 }
