@@ -1,5 +1,6 @@
 #include "engine/ScriptSystem.h"
 
+#include "engine/script/LuaGlobal.h"
 #include "engine/script/LuaVec3.h"
 
 #include <SDL3/SDL_log.h>
@@ -170,6 +171,7 @@ bool ScriptSystem::init(const Callbacks& callbacks) {
 
     ds::lua::registerVec3(m_state);
     registerBindings();
+    ds::lua::registerGlobalTable(m_state); // needs the "ds" table registerBindings() just built
     return true;
 }
 

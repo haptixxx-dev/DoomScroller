@@ -45,6 +45,7 @@ add_library(engine STATIC
     src/ScriptSystem.cpp
     src/script/LuaUserdata.cpp
     src/script/LuaVec3.cpp
+    src/script/LuaGlobal.cpp
     src/miniaudio_impl.cpp
     src/cgltf_impl.cpp
     src/stb_impl.cpp

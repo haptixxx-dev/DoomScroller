@@ -856,6 +856,46 @@ void Engine::initScripts() {
                     name.data(), value);
     };
 
+    // ds.Global.camera: live read/write onto m_camera. A script write lands
+    // directly on m_camera (same as every other writer), so it still composes
+    // with the shake/recoil copy render() builds each frame.
+    cb.camera.getPosition = [this] { return m_camera.position; };
+    cb.camera.setPosition = [this](const glm::vec3& p) { m_camera.position = p; };
+    cb.camera.getYaw       = [this] { return m_camera.yaw; };
+    cb.camera.setYaw       = [this](float y) { m_camera.yaw = y; };
+    cb.camera.getPitch     = [this] { return m_camera.pitch; };
+    cb.camera.setPitch     = [this](float p) { m_camera.pitch = p; };
+    cb.camera.getFovY      = [this] { return m_camera.fovY; };
+    cb.camera.setFovY      = [this](float f) { m_camera.fovY = f; };
+
+    // ds.Global.player: health is read/write; the rest mirror PlayerController's
+    // read-only accessors. m_playerEntity doesn't exist until later in
+    // initScene() either, so these go through try_get rather than get().
+    cb.player.getHealth = [this] {
+        auto* hp = m_world.try_get<HealthComponent>(m_playerEntity);
+        return hp ? hp->current : 0;
+    };
+    cb.player.setHealth = [this](int v) {
+        if (auto* hp = m_world.try_get<HealthComponent>(m_playerEntity))
+            hp->current = v;
+    };
+    cb.player.getMaxHealth = [this] {
+        auto* hp = m_world.try_get<HealthComponent>(m_playerEntity);
+        return hp ? hp->max : 0;
+    };
+    // m_player isn't constructed until later in initScene() (initScripts() runs
+    // first); guard so a script that touches ds.Global.player at load time
+    // (rather than per-frame, once the player exists) degrades to a default
+    // instead of dereferencing a null PlayerController.
+    cb.player.getDashCharges = [this] { return m_player ? m_player->dashCharges() : 0; };
+    cb.player.isSliding      = [this] { return m_player && m_player->sliding(); };
+    cb.player.getIFrames     = [this] { return m_player ? m_player->iFrames() : 0.f; };
+    cb.player.getEyePosition = [this] { return m_player ? m_player->eyePosition() : glm::vec3{0.f}; };
+
+    // ds.Global.time: current frame dt + monotonic elapsed seconds.
+    cb.time.getDt      = [this] { return m_dt; };
+    cb.time.getElapsed = [this] { return m_timeAccum; };
+
     if (!m_scripts.init(cb))
         return;
 

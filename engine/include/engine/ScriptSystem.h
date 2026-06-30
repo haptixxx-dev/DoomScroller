@@ -1,5 +1,7 @@
 #pragma once
 
+#include <glm/glm.hpp>
+
 #include <cstdint>
 #include <functional>
 #include <string>
@@ -46,6 +48,38 @@ struct ScriptWaveConfig {
 // isolation and the binding layer thin.
 class ScriptSystem {
   public:
+    // Backs ds.Global.camera's read/write properties (engine/script/LuaGlobal.*).
+    // Each getter/setter is wired in Engine::initScripts() to read/write the
+    // live ds::Camera directly, so a script write is visible the same frame.
+    struct CameraCallbacks {
+        std::function<glm::vec3()> getPosition;
+        std::function<void(const glm::vec3&)> setPosition;
+        std::function<float()> getYaw;
+        std::function<void(float)> setYaw;
+        std::function<float()> getPitch;
+        std::function<void(float)> setPitch;
+        std::function<float()> getFovY;
+        std::function<void(float)> setFovY;
+    };
+
+    // Backs ds.Global.player. Only `health` is writable; the rest are read-only
+    // (no setter exists, so ds.Global.player's __newindex rejects those keys).
+    struct PlayerCallbacks {
+        std::function<int()> getHealth;
+        std::function<void(int)> setHealth;
+        std::function<int()> getMaxHealth;
+        std::function<int()> getDashCharges;
+        std::function<bool()> isSliding;
+        std::function<float()> getIFrames;
+        std::function<glm::vec3()> getEyePosition;
+    };
+
+    // Backs ds.Global.time. Entirely read-only.
+    struct TimeCallbacks {
+        std::function<float()> getDt;
+        std::function<float()> getElapsed;
+    };
+
     // C++ side hooks the script can drive. Any unset callback makes the matching
     // Lua binding a silent no-op (still callable, returns sensible defaults).
     struct Callbacks {
@@ -57,6 +91,10 @@ class ScriptSystem {
         std::function<void(uint32_t entity, std::string_view field, float value)> setEntityField;
         // ds.emit_event(name [, number]) -> game-side event sink.
         std::function<void(std::string_view name, double value)> emitEvent;
+
+        CameraCallbacks camera;
+        PlayerCallbacks player;
+        TimeCallbacks time;
     };
 
     ScriptSystem();
@@ -100,6 +138,10 @@ class ScriptSystem {
 
     // Raw access for advanced callers / tests.
     lua_State* state() const { return m_state; }
+
+    // Read access to the wired callbacks for non-member binding code (e.g.
+    // engine/script/LuaGlobal.cpp) that isn't part of the ScriptSystem class.
+    const Callbacks& callbacks() const { return m_callbacks; }
 
     // Recovers the owning ScriptSystem* from a lua_State* (registry light-
     // userdata lookup). Shared by every binding trampoline file (ScriptSystem's
