@@ -303,9 +303,12 @@ Engine::~Engine() {
 void Engine::initScene() {
     ShaderLoader loader(static_cast<SDL_GPUDevice*>(m_device->nativeDevice()), paths::shaders());
     m_meshVS = loader.load(*m_device, "mesh", rhi::ShaderStage::Vertex, 0, 1);
-    // Mesh FS now declares 2 samplers (albedo + shadow map) and 3 uniform
-    // buffers (lights @0, material @1, shadow matrix @2).
-    m_meshFS = loader.load(*m_device, "mesh", rhi::ShaderStage::Fragment, 2, 3);
+    // Mesh FS now declares 8 samplers (albedo + sun shadow map + 6 point-
+    // shadow cube faces) and 4 uniform buffers (lights @0, material @1, sun
+    // shadow matrix @2, point-shadow face matrices+light pos @3). Keep this
+    // in sync with the hot-reload load call below AND with mesh.slang's
+    // actual binding count — a mismatch fails pipeline creation outright.
+    m_meshFS = loader.load(*m_device, "mesh", rhi::ShaderStage::Fragment, 8, 4);
 
     // Seed the runtime quality sizes (task 34): shadow-map resolution and the
     // bloom render-target size (half- vs full-window res). Done before the
@@ -661,7 +664,9 @@ void Engine::reloadShader(const std::string& name) {
     bool swapped             = false;
     try {
         newVS = loader.load(*m_device, "mesh", rhi::ShaderStage::Vertex, 0, 1);
-        newFS = loader.load(*m_device, "mesh", rhi::ShaderStage::Fragment, 2, 3);
+        // Keep these counts in sync with initScene()'s load call (8 samplers,
+        // 4 uniform buffers — see the comment there).
+        newFS = loader.load(*m_device, "mesh", rhi::ShaderStage::Fragment, 8, 4);
 
         // Mesh vertex layout (must match initScene): per-vertex stream at binding
         // 0 + per-instance model matrix at binding 1 (task 28). Shared helper so

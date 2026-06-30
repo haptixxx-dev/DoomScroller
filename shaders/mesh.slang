@@ -97,6 +97,115 @@ struct ShadowData {
 [vk::binding(2, 3)]
 ConstantBuffer<ShadowData> gShadow : register(b2, space3);
 
+// Point-light shadow (distance-based, 6 perspective faces — see
+// shaders/point_shadow_depth.slang and engine/ShadowMatrix.h's
+// pointShadowFaceMatrix). Exactly ONE point light shadow-casts per frame
+// (whichever is nearest the camera, chosen CPU-side); every other point
+// light stays unshadowed exactly as before. Each face is its own
+// texture+sampler pair (the SDL3 GPU backend requires a combined
+// texture+sampler at a shared binding index per slot; there is no
+// texture-array/cube support in this engine's RHI today, see PLAN). The mesh
+// FS's numSamplers therefore goes from 2 to 8 (gAlbedo + gShadowMap pair +
+// these 6 pairs) — engine/src/Engine.cpp's two ShaderDesc load call sites
+// MUST be updated to match, or pipeline creation fails outright.
+[vk::binding(2, 2)]
+Texture2D<float> gPointShadowFace0 : register(t2, space2);
+[vk::binding(2, 2)]
+SamplerState gPointShadowSampler0 : register(s2, space2);
+
+[vk::binding(3, 2)]
+Texture2D<float> gPointShadowFace1 : register(t3, space2);
+[vk::binding(3, 2)]
+SamplerState gPointShadowSampler1 : register(s3, space2);
+
+[vk::binding(4, 2)]
+Texture2D<float> gPointShadowFace2 : register(t4, space2);
+[vk::binding(4, 2)]
+SamplerState gPointShadowSampler2 : register(s4, space2);
+
+[vk::binding(5, 2)]
+Texture2D<float> gPointShadowFace3 : register(t5, space2);
+[vk::binding(5, 2)]
+SamplerState gPointShadowSampler3 : register(s5, space2);
+
+[vk::binding(6, 2)]
+Texture2D<float> gPointShadowFace4 : register(t6, space2);
+[vk::binding(6, 2)]
+SamplerState gPointShadowSampler4 : register(s6, space2);
+
+[vk::binding(7, 2)]
+Texture2D<float> gPointShadowFace5 : register(t7, space2);
+[vk::binding(7, 2)]
+SamplerState gPointShadowSampler5 : register(s7, space2);
+
+// Fragment uniform slot 3 (SPIRV set=3 binding=3, MSL buffer(3)). faceMatrices
+// are the SAME 6 view-projections used to render each face in
+// point_shadow_depth.slang (ds::pointShadowFaceMatrix on the CPU); reusing
+// them here (rather than hand-deriving cubemap UV formulas) guarantees the
+// sampling UV is the exact inverse of however the face was rendered.
+// lightPosActive.xyz = the shadow-casting light's world position,
+// lightPosActive.w = 1.0 if a light is shadow-casting this frame, else 0.0.
+struct PointShadowData {
+    column_major float4x4 faceMatrices[6];
+    float4 lightPosActive;
+};
+
+[vk::binding(3, 3)]
+ConstantBuffer<PointShadowData> gPointShadow : register(b3, space3);
+
+// Dominant-axis cube-face selection for the direction FROM the light TO a
+// point (mirrors ds::cubeFaceDirection's index order: 0=+X,1=-X,2=+Y,3=-Y,
+// 4=+Z,5=-Z).
+int selectShadowFace(float3 toPoint) {
+    float ax = abs(toPoint.x), ay = abs(toPoint.y), az = abs(toPoint.z);
+    if (ax >= ay && ax >= az)
+        return toPoint.x > 0.0 ? 0 : 1;
+    if (ay >= ax && ay >= az)
+        return toPoint.y > 0.0 ? 2 : 3;
+    return toPoint.z > 0.0 ? 4 : 5;
+}
+
+// Samples the stored distance for `face` at the given world position via that
+// face's own light-space matrix (same projection used to render it).
+// Out-of-frustum (shouldn't normally happen since the face was chosen by
+// dominant axis, but a fragment near a face boundary can straddle) returns a
+// large distance so the caller treats it as unshadowed.
+float sampleShadowFaceDistance(int face, float3 posWS) {
+    float4x4 m  = gPointShadow.faceMatrices[face];
+    float4 clip = mul(m, float4(posWS, 1.0));
+    if (clip.w <= 0.0)
+        return 1e9;
+    float3 ndc = clip.xyz / clip.w;
+    if (ndc.x < -1.0 || ndc.x > 1.0 || ndc.y < -1.0 || ndc.y > 1.0)
+        return 1e9;
+    float2 uv = float2(ndc.x * 0.5 + 0.5, 1.0 - (ndc.y * 0.5 + 0.5));
+
+    if (face == 0)
+        return gPointShadowFace0.Sample(gPointShadowSampler0, uv).r;
+    if (face == 1)
+        return gPointShadowFace1.Sample(gPointShadowSampler1, uv).r;
+    if (face == 2)
+        return gPointShadowFace2.Sample(gPointShadowSampler2, uv).r;
+    if (face == 3)
+        return gPointShadowFace3.Sample(gPointShadowSampler3, uv).r;
+    if (face == 4)
+        return gPointShadowFace4.Sample(gPointShadowSampler4, uv).r;
+    return gPointShadowFace5.Sample(gPointShadowSampler5, uv).r;
+}
+
+// Fraction of `lightPos`'s light that reaches `posWS`: 1 = fully lit, 0 =
+// fully shadowed. Single-tap (no PCF) for a first cut — soften later once
+// the base technique is confirmed working on real hardware.
+float samplePointShadow(float3 posWS, float3 lightPos) {
+    float3 toPoint = posWS - lightPos;
+    float dist     = length(toPoint);
+    int face       = selectShadowFace(toPoint);
+    float stored   = sampleShadowFaceDistance(face, posWS);
+
+    float bias = max(0.05, dist * 0.01);
+    return (dist - bias) > stored ? 0.0 : 1.0;
+}
+
 // Fraction of the directional sun that reaches `posWS`. 1 = fully lit, 0 =
 // fully shadowed. Projects into light clip space, does the [0,1] depth-range
 // compare (GLM_FORCE_DEPTH_ZERO_TO_ONE), applies a slope-scaled bias and a 3x3
@@ -244,6 +353,10 @@ float4 fragMain(VSOutput i) : SV_Target {
     Lo += sunShadow * cookTorrance(N, V, kSunDir, albedo, metallic, roughness, kSunColor * kSunRadiance);
 
     // Point lights with inverse-square falloff smoothly windowed to the radius.
+    // Exactly one light (whichever the CPU picked as nearest-to-camera, see
+    // gPointShadow.lightPosActive) gets real shadow occlusion; every other
+    // light stays unshadowed, exactly as before this feature.
+    bool pointShadowActive = gPointShadow.lightPosActive.w > 0.5;
     int count = min(gLights.count.x, kMaxLights);
     for (int li = 0; li < count; ++li) {
         Light L        = gLights.lights[li];
@@ -256,6 +369,10 @@ float4 fragMain(VSOutput i) : SV_Target {
         float  atten  = 1.0 / (1.0 + dist * dist);
         float  window = saturate(1.0 - (dist / radius));
         atten        *= window * window;
+
+        if (pointShadowActive && distance(L.posRadius.xyz, gPointShadow.lightPosActive.xyz) < 0.01)
+            atten *= samplePointShadow(i.posWS, L.posRadius.xyz);
+
         float3 radiance = L.colorIntensity.rgb * L.colorIntensity.w * atten;
         Lo += cookTorrance(N, V, ldir, albedo, metallic, roughness, radiance);
     }
