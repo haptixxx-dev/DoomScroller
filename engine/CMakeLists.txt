@@ -36,6 +36,7 @@ add_library(engine STATIC
     src/GltfExtract.cpp
     src/PhysicsWorld.cpp
     src/LevelLoader.cpp
+    src/LevelGen.cpp
     src/PlayerController.cpp
     src/ParticleSystem.cpp
     src/HighScore.cpp

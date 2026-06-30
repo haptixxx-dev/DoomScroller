@@ -91,6 +91,57 @@ int l_spawn_projectile(lua_State* L) {
     return 0;
 }
 
+// ds.level.add_box(center, half_extents, color) — accumulates a box into the
+// level-gen LevelData (engine/LevelGen.h). Silently no-ops outside a level-gen
+// run, since Callbacks::levelAddBox is unset on the main gameplay ScriptSystem.
+int l_level_add_box(lua_State* L) {
+    ScriptSystem* self = selfFromState(L);
+    glm::vec3* center  = ds::lua::checkUserdata<glm::vec3>(L, 1);
+    glm::vec3* half    = ds::lua::checkUserdata<glm::vec3>(L, 2);
+    glm::vec3* color   = ds::lua::checkUserdata<glm::vec3>(L, 3);
+    if (self && self->state())
+        self->invokeLevelAddBox(*center, *half, *color);
+    return 0;
+}
+
+// ds.level.add_mesh(path, position [, euler_degrees]) — euler_degrees is an
+// optional Vec3 of Euler angles in degrees (ergonomic for level authors,
+// who think in degrees, not quaternions); converted here so the C++
+// callback stays in proper glm::quat form.
+int l_level_add_mesh(lua_State* L) {
+    ScriptSystem* self = selfFromState(L);
+    const char* path   = luaL_checkstring(L, 1);
+    glm::vec3* pos     = ds::lua::checkUserdata<glm::vec3>(L, 2);
+    glm::vec3 eulerDeg{0.f};
+    if (!lua_isnoneornil(L, 3))
+        eulerDeg = *ds::lua::checkUserdata<glm::vec3>(L, 3);
+    if (self && self->state())
+        self->invokeLevelAddMesh(path, *pos, glm::quat(glm::radians(eulerDeg)));
+    return 0;
+}
+
+// ds.level.add_spawn(position, is_player)
+int l_level_add_spawn(lua_State* L) {
+    ScriptSystem* self = selfFromState(L);
+    glm::vec3* pos      = ds::lua::checkUserdata<glm::vec3>(L, 1);
+    bool isPlayer       = lua_toboolean(L, 2) != 0;
+    if (self && self->state())
+        self->invokeLevelAddSpawn(*pos, isPlayer);
+    return 0;
+}
+
+// ds.level.add_light(position, color, radius, intensity)
+int l_level_add_light(lua_State* L) {
+    ScriptSystem* self = selfFromState(L);
+    glm::vec3* pos      = ds::lua::checkUserdata<glm::vec3>(L, 1);
+    glm::vec3* color    = ds::lua::checkUserdata<glm::vec3>(L, 2);
+    float radius        = static_cast<float>(luaL_checknumber(L, 3));
+    float intensity     = static_cast<float>(luaL_checknumber(L, 4));
+    if (self && self->state())
+        self->invokeLevelAddLight(*pos, *color, radius, intensity);
+    return 0;
+}
+
 // Reads an integer field from a table at `tableIdx`; leaves the table in place.
 int tableIntField(lua_State* L, int tableIdx, const char* key, int fallback, bool* found) {
     lua_getfield(L, tableIdx, key);
@@ -140,6 +191,26 @@ void ScriptSystem::invokeSpawnProjectile(const glm::vec3& origin, const glm::vec
                                           uint32_t ownerBodyId) {
     if (m_callbacks.spawnProjectile)
         m_callbacks.spawnProjectile(origin, velocity, damage, ownerBodyId);
+}
+
+void ScriptSystem::invokeLevelAddBox(glm::vec3 center, glm::vec3 halfExtents, glm::vec3 color) {
+    if (m_callbacks.levelAddBox)
+        m_callbacks.levelAddBox(center, halfExtents, color);
+}
+
+void ScriptSystem::invokeLevelAddMesh(const std::string& meshPath, glm::vec3 position, glm::quat rotation) {
+    if (m_callbacks.levelAddMesh)
+        m_callbacks.levelAddMesh(meshPath, position, rotation);
+}
+
+void ScriptSystem::invokeLevelAddSpawn(glm::vec3 position, bool isPlayerStart) {
+    if (m_callbacks.levelAddSpawn)
+        m_callbacks.levelAddSpawn(position, isPlayerStart);
+}
+
+void ScriptSystem::invokeLevelAddLight(glm::vec3 position, glm::vec3 color, float radius, float intensity) {
+    if (m_callbacks.levelAddLight)
+        m_callbacks.levelAddLight(position, color, radius, intensity);
 }
 
 ScriptSystem::ScriptSystem() = default;
@@ -204,6 +275,18 @@ void ScriptSystem::registerBindings() {
     lua_setfield(m_state, -2, "emit_event");
     lua_pushcfunction(m_state, l_spawn_projectile);
     lua_setfield(m_state, -2, "spawn_projectile");
+
+    // ds.level.* — one-shot level-generation hooks (engine/LevelGen.h).
+    lua_newtable(m_state);
+    lua_pushcfunction(m_state, l_level_add_box);
+    lua_setfield(m_state, -2, "add_box");
+    lua_pushcfunction(m_state, l_level_add_mesh);
+    lua_setfield(m_state, -2, "add_mesh");
+    lua_pushcfunction(m_state, l_level_add_spawn);
+    lua_setfield(m_state, -2, "add_spawn");
+    lua_pushcfunction(m_state, l_level_add_light);
+    lua_setfield(m_state, -2, "add_light");
+    lua_setfield(m_state, -2, "level"); // ds.level = {...}
 
     lua_setglobal(m_state, "ds");
 }

@@ -58,6 +58,7 @@ add_executable(ds_script_tests
     test_wave_lua.cpp
     test_boss_lua.cpp
     test_enemy_ai_lua.cpp
+    test_level_lua.cpp
     ${CMAKE_SOURCE_DIR}/engine/src/ScriptSystem.cpp
     ${CMAKE_SOURCE_DIR}/engine/src/ScriptSystemGameplay.cpp
     ${CMAKE_SOURCE_DIR}/engine/src/script/LuaUserdata.cpp
