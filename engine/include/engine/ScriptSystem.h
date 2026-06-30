@@ -84,27 +84,19 @@ struct EnemyAIDecision {
     bool armWindup      = false;
 };
 
-struct ScriptWaveConfig {
-    int baseEnemies        = 3;
-    int enemiesPerWave     = 2;
-    int maxEnemiesPerWave  = 24;
-    int maxWaves           = 8;
-    float intermissionTime = 3.f;
-    int killScore          = 100;
-    bool overrode          = false; // true if set_wave_config / the config set any of these
-};
-
 // Lua scripting host. Owns a lua_State, exposes a thin "ds" table of C bindings
-// to scripts, runs a data-driven config (assets/scripts/waves.lua) and invokes
-// optional Lua event callbacks (onWaveStart / onEnemyDeath / onPlayerDeath)
-// from C++. Every public method is a no-op-friendly graceful fallback: if no
-// state is open or a script is missing, calls quietly do nothing so gameplay
-// code never has to guard them.
+// to scripts, owns the wave/parry/pickups/boss/enemy-AI gameplay state
+// machines (assets/scripts/*.lua), data-drives enemy stat overrides, and
+// invokes optional Lua event callbacks (onWaveStart / onEnemyDeath /
+// onPlayerDeath) from C++. Every public method is a no-op-friendly graceful
+// fallback: if no state is open or a script is missing, calls quietly do
+// nothing so gameplay code never has to guard them.
 //
 // The engine wires gameplay actions to scripts via the callbacks below
-// (spawnEnemy / setWaveConfig / get/setEntityField / emitEvent). ScriptSystem
-// never touches the ECS or physics directly, which keeps it testable in
-// isolation and the binding layer thin.
+// (spawnEnemy / spawnProjectile / get/setEntityField / emitEvent / camera /
+// player / time) and reads back live gameplay state via the typed wrappers
+// (wave*/parry*/pickup*/boss*/enemyAITick). ScriptSystem never touches the
+// ECS or physics directly, which keeps it testable in isolation.
 class ScriptSystem {
   public:
     // Backs ds.Global.camera's read/write properties (engine/script/LuaGlobal.*).
@@ -187,11 +179,10 @@ class ScriptSystem {
     // outside DS_DEV or if no file was loaded.
     bool reload();
 
-    // Reads ds.enemy_stats / ds.wave_config tables (if the config defined them)
-    // into plain structs. The returned struct's `overrode` flag is false when the
-    // script provided nothing, so the engine keeps its hardcoded defaults.
+    // Reads the ds.enemy_stats table (if the config defined it) into a plain
+    // struct. The returned struct's `overrode` flag is false when the script
+    // provided nothing, so the engine keeps its hardcoded defaults.
     ScriptEnemyStats enemyStats() const;
-    ScriptWaveConfig waveConfig() const;
 
     // Invoke optional Lua global event callbacks. Each looks up the named global
     // function; if absent or not callable it is silently skipped. Errors raised

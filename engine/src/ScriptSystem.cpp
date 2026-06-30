@@ -91,17 +91,6 @@ int l_spawn_projectile(lua_State* L) {
     return 0;
 }
 
-// ds.set_wave_config(table) — store the table as the global ds.wave_config so
-// waveConfig() can read it back. Thin: just records data, no engine coupling.
-int l_set_wave_config(lua_State* L) {
-    luaL_checktype(L, 1, LUA_TTABLE);
-    lua_getglobal(L, "ds");
-    lua_pushvalue(L, 1);
-    lua_setfield(L, -2, "wave_config");
-    lua_pop(L, 1); // ds
-    return 0;
-}
-
 // Reads an integer field from a table at `tableIdx`; leaves the table in place.
 int tableIntField(lua_State* L, int tableIdx, const char* key, int fallback, bool* found) {
     lua_getfield(L, tableIdx, key);
@@ -213,8 +202,6 @@ void ScriptSystem::registerBindings() {
     lua_setfield(m_state, -2, "set_field");
     lua_pushcfunction(m_state, l_emit_event);
     lua_setfield(m_state, -2, "emit_event");
-    lua_pushcfunction(m_state, l_set_wave_config);
-    lua_setfield(m_state, -2, "set_wave_config");
     lua_pushcfunction(m_state, l_spawn_projectile);
     lua_setfield(m_state, -2, "spawn_projectile");
 
@@ -277,31 +264,6 @@ ScriptEnemyStats ScriptSystem::enemyStats() const {
         out.overrode = found;
     }
     lua_pop(m_state, 2); // enemy_stats + ds
-    return out;
-}
-
-ScriptWaveConfig ScriptSystem::waveConfig() const {
-    ScriptWaveConfig out{};
-    if (!m_state)
-        return out;
-    lua_getglobal(m_state, "ds");
-    if (!lua_istable(m_state, -1)) {
-        lua_pop(m_state, 1);
-        return out;
-    }
-    lua_getfield(m_state, -1, "wave_config");
-    if (lua_istable(m_state, -1)) {
-        int idx               = lua_gettop(m_state);
-        bool found            = false;
-        out.baseEnemies       = tableIntField(m_state, idx, "base_enemies", out.baseEnemies, &found);
-        out.enemiesPerWave    = tableIntField(m_state, idx, "enemies_per_wave", out.enemiesPerWave, &found);
-        out.maxEnemiesPerWave = tableIntField(m_state, idx, "max_enemies_per_wave", out.maxEnemiesPerWave, &found);
-        out.maxWaves          = tableIntField(m_state, idx, "max_waves", out.maxWaves, &found);
-        out.intermissionTime  = tableFloatField(m_state, idx, "intermission_time", out.intermissionTime, &found);
-        out.killScore         = tableIntField(m_state, idx, "kill_score", out.killScore, &found);
-        out.overrode          = found;
-    }
-    lua_pop(m_state, 2); // wave_config + ds
     return out;
 }
 

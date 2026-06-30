@@ -22,35 +22,21 @@ TEST_CASE("ScriptSystem runs inline Lua and reads back a value", "[scripting]") 
     REQUIRE(scripts.getGlobalNumber("nope", 99.0) == Catch::Approx(99.0));
 }
 
-TEST_CASE("ScriptSystem reads data-driven enemy + wave config", "[scripting]") {
+// Wave config is fully Lua-side now (ds.wave.config, see test_wave_lua.cpp);
+// only the enemy stat override table is still read back into a C++ struct
+// (m_enemyStats, applied to spawned Grunts — the FSM logic itself moved to
+// Lua in test_enemy_ai_lua.cpp, but per-archetype stat overrides did not).
+TEST_CASE("ScriptSystem reads data-driven enemy stat overrides", "[scripting]") {
     ScriptSystem scripts;
     REQUIRE(scripts.init());
 
-    const char* cfg = R"lua(
-        ds.enemy_stats = { health = 250, speed = 6.5, damage = 30 }
-        ds.set_wave_config({
-            base_enemies = 5,
-            enemies_per_wave = 4,
-            max_waves = 12,
-            kill_score = 200,
-        })
-    )lua";
-    REQUIRE(scripts.doString(cfg));
+    REQUIRE(scripts.doString("ds.enemy_stats = { health = 250, speed = 6.5, damage = 30 }"));
 
     ScriptEnemyStats stats = scripts.enemyStats();
     REQUIRE(stats.overrode);
     REQUIRE(stats.health == 250);
     REQUIRE(stats.speed == Catch::Approx(6.5f));
     REQUIRE(stats.damage == 30);
-
-    ScriptWaveConfig wc = scripts.waveConfig();
-    REQUIRE(wc.overrode);
-    REQUIRE(wc.baseEnemies == 5);
-    REQUIRE(wc.enemiesPerWave == 4);
-    REQUIRE(wc.maxWaves == 12);
-    REQUIRE(wc.killScore == 200);
-    // Unset fields keep their defaults.
-    REQUIRE(wc.intermissionTime == Catch::Approx(3.f));
 }
 
 TEST_CASE("ScriptSystem invokes C++ callbacks from Lua bindings", "[scripting]") {
