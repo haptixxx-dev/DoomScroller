@@ -47,6 +47,10 @@ set(ENABLE_INSTALL       OFF CACHE BOOL "" FORCE)
 set(OVERRIDE_CXX_FLAGS   OFF CACHE BOOL "" FORCE)
 set(ENABLE_ALL_WARNINGS  OFF CACHE BOOL "" FORCE)
 set(FLOATING_POINT_EXCEPTIONS_ENABLED OFF CACHE BOOL "" FORCE)
+# Jolt defaults to the static MSVC runtime (/MT); every other target (SDL3,
+# mimalloc, the executables) uses CMake's default dynamic runtime (/MD). The
+# mismatch fails linking on Windows (LNK2038). Align Jolt to the dynamic runtime.
+set(USE_STATIC_MSVC_RUNTIME_LIBRARY OFF CACHE BOOL "" FORCE)
 add_subdirectory(extern/JoltPhysics/Build Jolt)
 
 # ---------------------------------------------------------------------------

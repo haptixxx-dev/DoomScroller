@@ -209,9 +209,9 @@ void AudioSystem::playMusic(const std::string& path) {
     }
 
     ma_sound_group* group = m_impl->groupsReady ? &m_impl->musicGroup : nullptr;
-    ma_result r = ma_sound_init_from_file(&m_impl->engine, full.string().c_str(),
-                                          MA_SOUND_FLAG_STREAM | MA_SOUND_FLAG_NO_SPATIALIZATION, group, nullptr,
-                                          &m_impl->musicSound);
+    ma_result r           = ma_sound_init_from_file(&m_impl->engine, full.string().c_str(),
+                                                    MA_SOUND_FLAG_STREAM | MA_SOUND_FLAG_NO_SPATIALIZATION, group, nullptr,
+                                                    &m_impl->musicSound);
     if (r != MA_SUCCESS) {
         SDL_LogWarn(SDL_LOG_CATEGORY_AUDIO, "AudioSystem: failed to load music (%d): %s", (int)r,
                     full.string().c_str());

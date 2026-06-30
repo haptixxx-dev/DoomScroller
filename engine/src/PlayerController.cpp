@@ -7,9 +7,9 @@
 
 namespace ds {
 
-PlayerController::PlayerController(PhysicsWorld& physics, uint32_t bodyId) : m_physics(physics), m_bodyId(bodyId) {
+PlayerController::PlayerController(PhysicsWorld& physics, uint32_t bodyId)
+    : m_physics(physics), m_bodyId(bodyId), m_dashCharges(tuning.dashMaxCharges) {
     // Start with a full dash bank.
-    m_dashCharges = tuning.dashMaxCharges;
 }
 
 void PlayerController::update(Camera& camera, glm::vec3 moveDir, bool jump, bool dashPressed, bool crouchHeld,

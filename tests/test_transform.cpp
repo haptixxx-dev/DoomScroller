@@ -1,7 +1,7 @@
 #include "engine/ecs/Components.h"
 
-#include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
+#include <catch2/catch_test_macros.hpp>
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
@@ -24,7 +24,7 @@ TEST_CASE("Transform identity model matrix", "[transform]") {
 
 TEST_CASE("Transform translation", "[transform]") {
     Transform t{};
-    t.position = {3.f, -1.f, 2.f};
+    t.position  = {3.f, -1.f, 2.f};
     glm::mat4 m = t.modelMatrix();
 
     glm::vec4 origin{0.f, 0.f, 0.f, 1.f};
@@ -34,7 +34,7 @@ TEST_CASE("Transform translation", "[transform]") {
 
 TEST_CASE("Transform scale", "[transform]") {
     Transform t{};
-    t.scale = {2.f, 3.f, 0.5f};
+    t.scale     = {2.f, 3.f, 0.5f};
     glm::mat4 m = t.modelMatrix();
 
     glm::vec4 p{1.f, 1.f, 1.f, 1.f};
@@ -44,7 +44,7 @@ TEST_CASE("Transform scale", "[transform]") {
 
 TEST_CASE("Transform 90-degree rotation around Y", "[transform]") {
     Transform t{};
-    t.rotation = glm::angleAxis(glm::radians(90.f), glm::vec3{0.f, 1.f, 0.f});
+    t.rotation  = glm::angleAxis(glm::radians(90.f), glm::vec3{0.f, 1.f, 0.f});
     glm::mat4 m = t.modelMatrix();
 
     // Right-handed GLM: R_y(90°) maps +Z -> +X
@@ -55,8 +55,8 @@ TEST_CASE("Transform 90-degree rotation around Y", "[transform]") {
 
 TEST_CASE("Transform TRS order: scale then rotate then translate", "[transform]") {
     Transform t{};
-    t.position = {10.f, 0.f, 0.f};
-    t.scale    = {2.f, 2.f, 2.f};
+    t.position  = {10.f, 0.f, 0.f};
+    t.scale     = {2.f, 2.f, 2.f};
     glm::mat4 m = t.modelMatrix();
 
     // Unit point at origin should end up at (10,0,0) after translate

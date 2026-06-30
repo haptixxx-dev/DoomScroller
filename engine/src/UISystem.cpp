@@ -323,8 +323,8 @@ void UISystem::drawText(float x, float y, std::string_view text, float scale, co
             int g     = code - kFirstGlyph;
             int cellX = g % kAtlasCols;
             int cellY = g / kAtlasCols;
-            float u0  = cellX * du;
-            float v0  = cellY * dv;
+            float u0  = static_cast<float>(cellX) * du;
+            float v0  = static_cast<float>(cellY) * dv;
             pushQuad(cursorX, cursorY, cell, cell, u0, v0, u0 + du, v0 + dv, color, m_font, m_sampler);
         }
         cursorX += cell;
@@ -350,7 +350,7 @@ float UISystem::textHeight(std::string_view text, float scale) const {
     for (char ch : text)
         if (ch == '\n')
             ++lines;
-    return lines * kCellPx * scale;
+    return static_cast<float>(lines * kCellPx) * scale;
 }
 
 void UISystem::flush(rhi::IRHIDevice& device, rhi::IRHICommandList* cmd) {

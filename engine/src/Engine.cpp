@@ -1177,7 +1177,7 @@ void Engine::renderHUD(rhi::IRHICommandList* cmd) {
     m_ui.begin(m_windowWidth, m_windowHeight);
 
     const auto& health   = m_world.get<HealthComponent>(m_playerEntity);
-    float healthFrac     = health.max > 0 ? static_cast<float>(health.current) / health.max : 0.f;
+    float healthFrac     = health.max > 0 ? static_cast<float>(health.current) / static_cast<float>(health.max) : 0.f;
     healthFrac           = std::clamp(healthFrac, 0.f, 1.f);
     const bool lowHealth = healthFrac <= 0.3f;
 
