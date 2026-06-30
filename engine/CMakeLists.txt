@@ -16,7 +16,6 @@ target_link_libraries(engine_headers INTERFACE glm::glm EnTT::EnTT)
 add_library(engine_math STATIC
     src/Camera.cpp
     src/ParticleSystem.cpp
-    src/WaveSystem.cpp
     src/ShaderWatcher.cpp
 )
 target_include_directories(engine_math PUBLIC
@@ -38,7 +37,6 @@ add_library(engine STATIC
     src/LevelLoader.cpp
     src/PlayerController.cpp
     src/ParticleSystem.cpp
-    src/WaveSystem.cpp
     src/HighScore.cpp
     src/UISystem.cpp
     src/AudioSystem.cpp

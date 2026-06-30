@@ -1,5 +1,7 @@
 #pragma once
 
+#include "engine/WaveSystem.h"
+
 #include <glm/glm.hpp>
 
 #include <cstdint>
@@ -179,6 +181,24 @@ class ScriptSystem {
     // Resets ds.pickups.kill_count (the drop-cadence counter) to 0; called on
     // (re)start so wave-to-wave drop cadence doesn't carry over between runs.
     void pickupsReset();
+
+    // --- Wave progression (assets/scripts/wave.lua, module ds.wave). --------
+    // Lua owns the live WaveState; readWaveState() pulls ds.wave.state back
+    // into a WaveState for Engine.h/HUD/save code that reads m_wave.* fields
+    // directly. Call it after any of the mutators below to refresh the cache.
+    WaveState readWaveState() const;
+    void waveReset();
+    void waveTick(float dt);
+    void waveRegisterKill();
+    void waveAdvance();
+    int waveEnemiesForWave(int wave) const;
+    // Mirrors EnTT's live enemy count into ds.wave.state.alive_enemies.
+    void waveSetAliveEnemies(int n);
+    // First clear frame: arms the intermission countdown to the next wave.
+    void waveArmIntermission();
+    // Records that aliveCount enemies were just spawned and clears
+    // ds.wave.state.spawn_pending.
+    void waveMarkSpawned(int aliveCount);
 
     // Raw access for advanced callers / tests.
     lua_State* state() const { return m_state; }

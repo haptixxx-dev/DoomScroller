@@ -313,20 +313,24 @@ class Engine {
     AudioSystem m_audio;
     PhysicsWorld m_physics;
 
-    // Lua scripting host: data-drives wave/enemy tuning from assets/scripts and
-    // fires onWaveStart / onEnemyDeath / onPlayerDeath callbacks. Initialised in
-    // initScene(); all hooks are no-ops if the config failed to load.
+    // Lua scripting host: owns the wave/parry/pickups gameplay state machines
+    // (and, in later steps, boss + enemy AI), data-drives enemy stat overrides,
+    // and fires onWaveStart / onEnemyDeath / onPlayerDeath callbacks.
+    // Initialised in initScene(); every wrapper is a no-op-friendly graceful
+    // fallback if a script failed to load.
     ScriptSystem m_scripts;
     // Cached enemy stats from the loaded Lua config (or hardcoded defaults when
     // the script provided none). Applied to each spawned enemy.
     ScriptEnemyStats m_enemyStats;
-    // Loads assets/scripts/waves.lua (if present), wires bindings, and pulls the
-    // wave/enemy tuning back into m_waveConfig / m_enemyStats. Graceful fallback
-    // to hardcoded defaults when the file is missing or errors.
+    // Wires Callbacks (camera/player/time + the gameplay action hooks) and
+    // loads every file in kScripts, in order. A missing/broken file just
+    // leaves its module's functions undefined (every ScriptSystem wrapper
+    // degrades gracefully), so load order doesn't matter — each script owns
+    // an independent ds.<module> table.
     void initScripts();
-    static constexpr const char* kWaveScript    = "scripts/waves.lua";
-    static constexpr const char* kParryScript   = "scripts/parry.lua";
-    static constexpr const char* kPickupsScript = "scripts/pickups.lua";
+    static constexpr const char* kScripts[] = {
+        "scripts/enemy_ai.lua", "scripts/wave.lua", "scripts/parry.lua", "scripts/pickups.lua", "scripts/hooks.lua",
+    };
     uint32_t m_playerBodyId                  = 0;
     std::unique_ptr<PlayerController> m_player;
 
@@ -463,9 +467,12 @@ class Engine {
     static constexpr int kSettingsRowCount = 6; // master/sfx/music/ui/sens + toggles row
 
     // --- Game state machine + wave/score state (task 18). ------------------
+    // m_wave is a read-back cache: every mutation goes through m_scripts'
+    // wave*() wrappers (assets/scripts/wave.lua, module ds.wave), refreshed via
+    // m_scripts.readWaveState() after each one. Config now lives entirely in
+    // ds.wave.config; nothing in Engine.cpp reads a WaveConfig anymore.
     GameState m_state = GameState::Menu;
     WaveState m_wave;
-    WaveConfig m_waveConfig;
     int m_highScore = 0; // best score loaded from disk, updated on death/victory
 
     // --- Persistent progression save (task 38). ----------------------------

@@ -11,6 +11,31 @@
 
 namespace ds {
 
+namespace {
+
+int tableIntField(lua_State* L, int idx, const char* key, int fallback) {
+    lua_getfield(L, idx, key);
+    int out = lua_isnumber(L, -1) ? static_cast<int>(lua_tointeger(L, -1)) : fallback;
+    lua_pop(L, 1);
+    return out;
+}
+
+float tableFloatField(lua_State* L, int idx, const char* key, float fallback) {
+    lua_getfield(L, idx, key);
+    float out = lua_isnumber(L, -1) ? static_cast<float>(lua_tonumber(L, -1)) : fallback;
+    lua_pop(L, 1);
+    return out;
+}
+
+bool tableBoolField(lua_State* L, int idx, const char* key, bool fallback) {
+    lua_getfield(L, idx, key);
+    bool out = lua_isboolean(L, -1) ? (lua_toboolean(L, -1) != 0) : fallback;
+    lua_pop(L, 1);
+    return out;
+}
+
+} // namespace
+
 void ScriptSystem::parryReset() {
     if (!m_state)
         return;
@@ -106,6 +131,90 @@ void ScriptSystem::pickupsReset() {
     if (!m_state)
         return;
     callModuleFunction("pickups", "reset", 0, 0);
+}
+
+WaveState ScriptSystem::readWaveState() const {
+    WaveState out{};
+    if (!m_state)
+        return out;
+    lua_getglobal(m_state, "ds");
+    lua_getfield(m_state, -1, "wave");
+    if (lua_istable(m_state, -1)) {
+        lua_getfield(m_state, -1, "state");
+        if (lua_istable(m_state, -1)) {
+            int idx              = lua_gettop(m_state);
+            out.wave              = tableIntField(m_state, idx, "wave", out.wave);
+            out.aliveEnemies      = tableIntField(m_state, idx, "alive_enemies", out.aliveEnemies);
+            out.intermission      = tableFloatField(m_state, idx, "intermission", out.intermission);
+            out.intermissionArmed = tableBoolField(m_state, idx, "intermission_armed", out.intermissionArmed);
+            out.spawnPending      = tableBoolField(m_state, idx, "spawn_pending", out.spawnPending);
+            out.cleared           = tableBoolField(m_state, idx, "cleared", out.cleared);
+            out.kills             = tableIntField(m_state, idx, "kills", out.kills);
+            out.score             = tableIntField(m_state, idx, "score", out.score);
+            out.timeSurvived      = tableFloatField(m_state, idx, "time_survived", out.timeSurvived);
+            out.combo             = tableIntField(m_state, idx, "combo", out.combo);
+            out.bestCombo         = tableIntField(m_state, idx, "best_combo", out.bestCombo);
+            out.comboTimer        = tableFloatField(m_state, idx, "combo_timer", out.comboTimer);
+        }
+        lua_pop(m_state, 1); // state
+    }
+    lua_pop(m_state, 2); // wave, ds
+    return out;
+}
+
+void ScriptSystem::waveReset() {
+    if (!m_state)
+        return;
+    callModuleFunction("wave", "reset", 0, 0);
+}
+
+void ScriptSystem::waveTick(float dt) {
+    if (!m_state)
+        return;
+    lua_pushnumber(m_state, static_cast<lua_Number>(dt));
+    callModuleFunction("wave", "tick", 1, 0);
+}
+
+void ScriptSystem::waveRegisterKill() {
+    if (!m_state)
+        return;
+    callModuleFunction("wave", "register_kill", 0, 0);
+}
+
+void ScriptSystem::waveAdvance() {
+    if (!m_state)
+        return;
+    callModuleFunction("wave", "advance", 0, 0);
+}
+
+int ScriptSystem::waveEnemiesForWave(int wave) const {
+    if (!m_state)
+        return 0;
+    lua_pushinteger(m_state, wave);
+    callModuleFunction("wave", "enemies_for_wave", 1, 1);
+    int n = static_cast<int>(lua_tointeger(m_state, -1));
+    lua_pop(m_state, 1);
+    return n;
+}
+
+void ScriptSystem::waveSetAliveEnemies(int n) {
+    if (!m_state)
+        return;
+    lua_pushinteger(m_state, n);
+    callModuleFunction("wave", "set_alive", 1, 0);
+}
+
+void ScriptSystem::waveArmIntermission() {
+    if (!m_state)
+        return;
+    callModuleFunction("wave", "arm_intermission", 0, 0);
+}
+
+void ScriptSystem::waveMarkSpawned(int aliveCount) {
+    if (!m_state)
+        return;
+    lua_pushinteger(m_state, aliveCount);
+    callModuleFunction("wave", "mark_spawned", 1, 0);
 }
 
 } // namespace ds

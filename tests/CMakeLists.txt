@@ -15,7 +15,6 @@ add_executable(ds_engine_tests
     test_lights.cpp
     test_movement.cpp
     test_projectile.cpp
-    test_waves.cpp
     test_frustum.cpp
     test_gamefeel.cpp
     test_style.cpp
@@ -50,6 +49,7 @@ add_executable(ds_script_tests
     test_lua_global.cpp
     test_parry_lua.cpp
     test_pickups_lua.cpp
+    test_wave_lua.cpp
     ${CMAKE_SOURCE_DIR}/engine/src/ScriptSystem.cpp
     ${CMAKE_SOURCE_DIR}/engine/src/ScriptSystemGameplay.cpp
     ${CMAKE_SOURCE_DIR}/engine/src/script/LuaUserdata.cpp

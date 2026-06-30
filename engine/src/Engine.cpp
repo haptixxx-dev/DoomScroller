@@ -204,8 +204,8 @@ Engine::Engine(const EngineConfig& cfg) : m_windowWidth(cfg.width), m_windowHeig
 
     initScene();
 
-    // Lua data-driven tuning (waves + enemy stats). Must run after m_waveConfig
-    // holds its hardcoded defaults so the script only overrides what it sets.
+    // Lua scripting: loads the wave/parry/pickups state machines + enemy stat
+    // overrides (assets/scripts/*.lua) and wires the ds.Global/callback surface.
     initScripts();
 
     // Persistent progression (task 38): seed m_save + m_highScore from
@@ -899,34 +899,19 @@ void Engine::initScripts() {
     if (!m_scripts.init(cb))
         return;
 
-    // Parry state machine (engine/include/engine/ParryTech.h ported to Lua).
-    // Missing/broken parry.lua leaves ds.parry undefined; every ScriptSystem
-    // parry* wrapper degrades gracefully (callModuleFunction's no-op path) so
-    // gameplay just sees a parry that never triggers rather than a crash.
-    std::filesystem::path parryScriptPath = paths::assets() / kParryScript;
-    m_scripts.loadFile(parryScriptPath.string());
-
-    // Pickup drop cadence + collection decision (engine/include/engine/
-    // PickupSystem.h + the inline logic in handleEnemyDeaths/pickupSystem,
-    // ported to Lua). Missing/broken -> the wrappers below fall back to
-    // never-drop/never-collect rather than crashing.
-    std::filesystem::path pickupsScriptPath = paths::assets() / kPickupsScript;
-    m_scripts.loadFile(pickupsScriptPath.string());
-
-    // Load the wave/enemy config; missing or broken -> keep hardcoded defaults.
-    std::filesystem::path scriptPath = paths::assets() / kWaveScript;
-    if (m_scripts.loadFile(scriptPath.string())) {
-        ScriptWaveConfig wc = m_scripts.waveConfig();
-        if (wc.overrode) {
-            m_waveConfig.baseEnemies       = wc.baseEnemies;
-            m_waveConfig.enemiesPerWave    = wc.enemiesPerWave;
-            m_waveConfig.maxEnemiesPerWave = wc.maxEnemiesPerWave;
-            m_waveConfig.maxWaves          = wc.maxWaves;
-            m_waveConfig.intermissionTime  = wc.intermissionTime;
-            m_waveConfig.killScore         = wc.killScore;
-        }
-        m_enemyStats = m_scripts.enemyStats();
+    // Load every gameplay script (enemy stats, wave/parry/pickups state
+    // machines, event hooks). Each owns an independent ds.<module> table, so a
+    // missing/broken file just leaves that module undefined — every
+    // ScriptSystem wrapper degrades gracefully rather than crashing.
+    for (const char* script : kScripts) {
+        std::filesystem::path scriptPath = paths::assets() / script;
+        m_scripts.loadFile(scriptPath.string());
     }
+
+    // Cached enemy stat overrides (assets/scripts/enemy_ai.lua's ds.enemy_stats
+    // table), applied to each spawned Grunt. Falls back to hardcoded defaults
+    // (ScriptEnemyStats{}) if the script didn't set anything.
+    m_enemyStats = m_scripts.enemyStats();
 }
 
 void Engine::spawnEnemies() {
@@ -996,7 +981,8 @@ void Engine::startGame() {
 
     respawnPlayer();
 
-    resetWave(m_wave);
+    m_scripts.waveReset();
+    m_wave        = m_scripts.readWaveState();
     m_weaponIndex = 0;
     m_damageFlash = 0.f;
     m_scripts.pickupsReset();
@@ -1026,12 +1012,13 @@ void Engine::startGame() {
     m_hitMarker = HitMarker{};
 
     // Kick off the first wave immediately (no intermission before wave 1).
-    advanceWave(m_wave, m_waveConfig);
+    m_scripts.waveAdvance();
+    m_wave = m_scripts.readWaveState();
     if (m_wave.spawnPending) {
-        int n = enemiesForWave(m_wave.wave, m_waveConfig);
+        int n = m_scripts.waveEnemiesForWave(m_wave.wave);
         spawnWaveEnemies(n);
-        m_wave.aliveEnemies = n;
-        m_wave.spawnPending = false;
+        m_scripts.waveMarkSpawned(n);
+        m_wave = m_scripts.readWaveState();
         m_scripts.onWaveStart(m_wave.wave);
     }
 
@@ -2020,9 +2007,11 @@ void Engine::updatePlaying() {
     // best-known impact site.
     int killsThisFrame = enemiesBeforeStep - enemiesAfterStep;
     for (int i = enemiesAfterStep; i < enemiesBeforeStep; ++i) {
-        registerKill(m_wave, m_waveConfig);
+        m_scripts.waveRegisterKill();
         m_scripts.onEnemyDeath(0, m_camera.position.x, m_camera.position.y, m_camera.position.z);
     }
+    if (killsThisFrame > 0)
+        m_wave = m_scripts.readWaveState();
     // Style meter (task 32): score the flashiest applicable category per kill.
     // Multi-kill (>=2 this frame) trumps the single-kill variants.
     if (killsThisFrame > 0) {
@@ -2165,11 +2154,13 @@ void Engine::updatePlaying() {
 
 void Engine::updateWaves() {
     // Advance combo / intermission / survival timers.
-    tickWave(m_wave, m_dt);
+    m_scripts.waveTick(m_dt);
 
     // Keep aliveEnemies in sync with the world (kills are also decremented in
     // registerKill, but this guards against any external destruction).
-    m_wave.aliveEnemies = static_cast<int>(m_world.view<EnemyComponent>().size());
+    int aliveNow = static_cast<int>(m_world.view<EnemyComponent>().size());
+    m_scripts.waveSetAliveEnemies(aliveNow);
+    m_wave = m_scripts.readWaveState();
 
     if (m_wave.aliveEnemies > 0 || m_wave.cleared)
         return;
@@ -2181,10 +2172,10 @@ void Engine::updateWaves() {
 
     if (!m_wave.intermissionArmed) {
         // First clear frame: arm the intermission delay, then wait for it to
-        // elapse via tickWave on subsequent frames. Grant a weapon upgrade once
-        // per cleared wave (task 37).
-        m_wave.intermission      = m_waveConfig.intermissionTime;
-        m_wave.intermissionArmed = true;
+        // elapse via ds.wave.tick on subsequent frames. Grant a weapon upgrade
+        // once per cleared wave (task 37).
+        m_scripts.waveArmIntermission();
+        m_wave = m_scripts.readWaveState();
         if (m_wave.wave != m_lastUpgradeWave) {
             grantWeaponUpgrade();
             m_lastUpgradeWave = m_wave.wave;
@@ -2193,8 +2184,9 @@ void Engine::updateWaves() {
     }
 
     // Intermission has elapsed: advance to the next wave (or trigger the boss).
-    m_wave.intermissionArmed = false;
-    advanceWave(m_wave, m_waveConfig);
+    // ds.wave.advance() also clears intermission_armed.
+    m_scripts.waveAdvance();
+    m_wave = m_scripts.readWaveState();
     if (m_wave.cleared) {
         // Final wave cleared: instead of an immediate Victory, spawn ONE boss as
         // the climactic encounter (task 40). bossSystem flips the state to
@@ -2205,10 +2197,10 @@ void Engine::updateWaves() {
         return;
     }
     if (m_wave.spawnPending) {
-        int n = enemiesForWave(m_wave.wave, m_waveConfig);
+        int n = m_scripts.waveEnemiesForWave(m_wave.wave);
         spawnWaveEnemies(n);
-        m_wave.aliveEnemies = n;
-        m_wave.spawnPending = false;
+        m_scripts.waveMarkSpawned(n);
+        m_wave = m_scripts.readWaveState();
         m_scripts.onWaveStart(m_wave.wave);
     }
 }
