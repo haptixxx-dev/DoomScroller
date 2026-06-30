@@ -223,6 +223,45 @@ void ScriptSystem::bossReset() {
     callModuleFunction("boss", "reset", 0, 0);
 }
 
+EnemyAIDecision ScriptSystem::enemyAITick(int archetype, int state, float dist, float attackCooldown,
+                                           float moveSpeed, float attackRange, float detectionRange,
+                                           float attackInterval, float chargeWindup, float chargeSpeed) {
+    EnemyAIDecision out{};
+    if (!m_state)
+        return out;
+    lua_pushinteger(m_state, archetype);
+    lua_pushinteger(m_state, state);
+    lua_pushnumber(m_state, static_cast<lua_Number>(dist));
+    lua_pushnumber(m_state, static_cast<lua_Number>(attackCooldown));
+    lua_pushnumber(m_state, static_cast<lua_Number>(moveSpeed));
+    lua_pushnumber(m_state, static_cast<lua_Number>(attackRange));
+    lua_pushnumber(m_state, static_cast<lua_Number>(detectionRange));
+    lua_pushnumber(m_state, static_cast<lua_Number>(attackInterval));
+    lua_pushnumber(m_state, static_cast<lua_Number>(chargeWindup));
+    lua_pushnumber(m_state, static_cast<lua_Number>(chargeSpeed));
+    callModuleFunction("enemy_ai", "tick", 10, 7);
+    out.state          = static_cast<int>(lua_tointeger(m_state, -7));
+    out.setVelocity    = lua_toboolean(m_state, -6) != 0;
+    out.moveIntent     = static_cast<float>(lua_tonumber(m_state, -5));
+    out.lunge          = lua_toboolean(m_state, -4) != 0;
+    out.fireProjectile = lua_toboolean(m_state, -3) != 0;
+    out.meleeAttack    = lua_toboolean(m_state, -2) != 0;
+    out.armWindup      = lua_toboolean(m_state, -1) != 0;
+    lua_pop(m_state, 7);
+    return out;
+}
+
+int ScriptSystem::archetypeForWave(int wave, int spawnIndex) const {
+    if (!m_state)
+        return 0; // Grunt
+    lua_pushinteger(m_state, wave);
+    lua_pushinteger(m_state, spawnIndex);
+    callModuleFunction("enemy_ai", "archetype_for_wave", 2, 1);
+    int archetype = static_cast<int>(lua_tointeger(m_state, -1));
+    lua_pop(m_state, 1);
+    return archetype;
+}
+
 BossTickResult ScriptSystem::bossTick(int health, int maxHealth, float dt, const glm::vec3& bossPos,
                                        const glm::vec3& playerPos, uint32_t bossBodyId) {
     BossTickResult out{};

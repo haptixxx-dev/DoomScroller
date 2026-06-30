@@ -1,5 +1,7 @@
 #pragma once
 
+#include "engine/ScriptSystem.h"
+
 #include <cstdint>
 #include <entt/entt.hpp>
 #include <functional>
@@ -22,15 +24,17 @@ struct EnemyProjectileSpawn {
 };
 using EnemyProjectileFn = std::function<void(const EnemyProjectileSpawn&)>;
 
-// Drives enemy AI and melee contact damage. Branches on EnemyComponent.archetype:
-//   Grunt   - melee chase/attack (the legacy behavior).
-//   Charger - telegraphs a windup at lunge range, then bursts at chargeSpeed.
-//   Ranged  - holds distance and emits a projectile via spawnProjectile.
+// Drives enemy AI and melee contact damage. The FSM decision (state
+// transitions, attack/lunge/fire timing) lives in Lua (assets/scripts/
+// enemy_ai.lua, module ds.enemy_ai, via scripts.enemyAITick); this function
+// keeps the EnTT/Jolt loop (position sync, dist/dir computation, the
+// health<=0 destroy check) and applies the returned decision (velocity,
+// damage, projectile spawn — all C++-only state the Lua side can't see).
 // When an enemy is in the Attack state and within attackRange, melee archetypes
 // deal attackDamage to playerHealth on a per-enemy cooldown. Damage is gated by
 // playerIFrames (shared i-frame timer); playerHealth/playerIFrames may be null
 // to disable player damage. spawnProjectile may be empty (disables Ranged fire).
-void enemySystem(entt::registry& world, PhysicsWorld& physics, glm::vec3 playerPos, float dt,
+void enemySystem(entt::registry& world, PhysicsWorld& physics, ScriptSystem& scripts, glm::vec3 playerPos, float dt,
                  HealthComponent* playerHealth = nullptr, float* playerIFrames = nullptr,
                  const EnemyProjectileFn& spawnProjectile = {});
 

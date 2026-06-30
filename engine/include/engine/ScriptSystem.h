@@ -62,6 +62,28 @@ struct BossTickResult {
     int pattern = 0;
 };
 
+// Result of ds.enemy_ai.tick() (assets/scripts/enemy_ai.lua): a per-entity AI
+// decision the caller (engine/src/ecs/EnemySystem.cpp) applies to physics/
+// component state. `state` mirrors EnemyComponent::State's int value.
+// `setVelocity`/`moveIntent` together replace a direct physics call: when
+// setVelocity is true the caller sets linear velocity to
+// `dir * (lunge ? chargeSpeed : moveSpeed) * moveIntent` (Y untouched);
+// when false the caller leaves velocity alone entirely (some original
+// branches intentionally never call setLinearVelocity, letting the body
+// coast). `lunge`/`fireProjectile`/`meleeAttack`/`armWindup` are one-shot
+// per-archetype action flags the caller applies it own way (damage/spawn/
+// cooldown rearm), since those touch C++-only state (i-frames, the
+// projectile spawn callback) the Lua side can't see.
+struct EnemyAIDecision {
+    int state           = 0;
+    bool setVelocity    = false;
+    float moveIntent    = 0.f;
+    bool lunge          = false;
+    bool fireProjectile = false;
+    bool meleeAttack    = false;
+    bool armWindup      = false;
+};
+
 struct ScriptWaveConfig {
     int baseEnemies        = 3;
     int enemiesPerWave     = 2;
@@ -228,6 +250,19 @@ class ScriptSystem {
     void bossReset();
     BossTickResult bossTick(int health, int maxHealth, float dt, const glm::vec3& bossPos, const glm::vec3& playerPos,
                              uint32_t bossBodyId);
+
+    // --- Enemy AI (assets/scripts/enemy_ai.lua, module ds.enemy_ai). --------
+    // Lua owns the FSM decision (state transitions, attack/lunge/fire timing);
+    // engine/src/ecs/EnemySystem.cpp keeps the EnTT/Jolt loop and applies the
+    // decision (velocity, damage, projectile spawn — all C++-only state).
+    // archetype/state are plain ints mirroring EnemyArchetype/
+    // EnemyComponent::State so this stays decoupled from Components.h.
+    EnemyAIDecision enemyAITick(int archetype, int state, float dist, float attackCooldown, float moveSpeed,
+                                 float attackRange, float detectionRange, float attackInterval, float chargeWindup,
+                                 float chargeSpeed);
+    // Deterministic archetype pick for a wave-spawned enemy (port of
+    // Engine::archetypeForWave); returns 0=Grunt, 1=Charger, 2=Ranged.
+    int archetypeForWave(int wave, int spawnIndex) const;
 
     // Raw access for advanced callers / tests.
     lua_State* state() const { return m_state; }

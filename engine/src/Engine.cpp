@@ -1573,16 +1573,9 @@ entt::entity Engine::spawnEnemy(glm::vec3 position, rhi::RHITexture albedo, rhi:
 }
 
 EnemyArchetype Engine::archetypeForWave(int wave, int spawnIndex) const {
-    // Wave 1: all Grunts. From wave 2 mix in Chargers; from wave 3 add Ranged.
-    // Deterministic from (wave, spawnIndex) so spawns are reproducible.
-    if (wave <= 1)
-        return EnemyArchetype::Grunt;
-    int sel = (wave + spawnIndex) % 3;
-    if (wave >= 3 && sel == 2)
-        return EnemyArchetype::Ranged;
-    if (sel == 1)
-        return EnemyArchetype::Charger;
-    return EnemyArchetype::Grunt;
+    // Deterministic archetype pick for a wave-spawned enemy, now Lua-side
+    // (assets/scripts/enemy_ai.lua, ds.enemy_ai.archetype_for_wave).
+    return static_cast<EnemyArchetype>(m_scripts.archetypeForWave(wave, spawnIndex));
 }
 
 void Engine::buildArena(rhi::RHITexture albedo, rhi::RHISampler sampler) {
@@ -1956,7 +1949,7 @@ void Engine::updatePlaying() {
     // diffing the live count is how we detect kills for score/combo + waves.
     int enemiesBeforeStep = static_cast<int>(m_world.view<EnemyComponent>().size());
     enemySystem(
-        m_world, m_physics, m_camera.position, m_dt, &playerHealth, &m_playerIFrames,
+        m_world, m_physics, m_scripts, m_camera.position, m_dt, &playerHealth, &m_playerIFrames,
         [this](const EnemyProjectileSpawn& s) { spawnEnemyProjectile(s.origin, s.velocity, s.damage, s.ownerBodyId); });
     int enemiesAfterStep = static_cast<int>(m_world.view<EnemyComponent>().size());
     if (playerHealth.current < healthBeforeStep) {
