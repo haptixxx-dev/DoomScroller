@@ -142,7 +142,8 @@ struct PickupComponent {
 
 // A boss enemy with phased AI (task 40). The boss is one large, high-health
 // entity spawned as the final wave. As health crosses descending fractional
-// thresholds the phase advances (see BossLogic::bossPhaseForHealth), gating a
+// thresholds the phase advances (see assets/scripts/boss.lua's phase_for_health
+// port of the former BossLogic::bossPhaseForHealth), gating a
 // brief parryable vulnerable window and escalating its attack pattern. health
 // lives on the entity's HealthComponent; maxHealth is cached here for the bar.
 struct BossComponent {

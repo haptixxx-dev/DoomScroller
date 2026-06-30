@@ -1420,9 +1420,12 @@ void Engine::spawnBoss() {
     BossComponent boss{};
     boss.maxHealth     = 2000;
     boss.physicsBodyId = bodyId;
-    boss.attackTimer   = 2.f; // brief grace before the first volley
     m_world.emplace<BossComponent>(e, boss);
     m_world.emplace<HealthComponent>(e, HealthComponent{boss.maxHealth, boss.maxHealth});
+
+    // Phase/attack-pattern state now lives in Lua (assets/scripts/boss.lua,
+    // module ds.boss, single global instance) — reset it for this new boss.
+    m_scripts.bossReset();
 
     // A persistent ominous light at the boss.
     spawnTransientLight(spawn, {1.f, 0.2f, 0.1f}, 8.f, 4.f, 1.5f);
@@ -1449,65 +1452,27 @@ void Engine::bossSystem(float dt) {
             return;
         }
 
-        // Phase transition: when the computed phase exceeds the stored one, open
-        // a brief parryable vulnerable window and bump the attack cadence.
-        std::span<const float> thresholds{boss.phaseHealthThresholds, 3};
-        int newPhase = bossPhaseForHealth(health.current, boss.maxHealth, thresholds);
-        if (newPhase > boss.phase) {
-            boss.phase           = newPhase;
-            boss.vulnerableTimer = 2.0f; // window the player can punish / parry
-            boss.attackTimer     = 1.0f;
+        // Phase/attack-pattern logic now lives in Lua (assets/scripts/boss.lua,
+        // module ds.boss); it fires pellets itself via ds.spawn_projectile
+        // (wired to spawnEnemyProjectile below). Compare the returned phase/
+        // pattern to the cached previous values to detect a phase transition
+        // (VFX/audio cue) and a fire event (weapon-fire cue) respectively.
+        int oldPhase          = boss.phase;
+        int oldPattern        = boss.pattern;
+        BossTickResult result = m_scripts.bossTick(health.current, boss.maxHealth, dt, transform.position,
+                                                     m_camera.position, boss.physicsBodyId);
+        boss.phase           = result.phase;
+        boss.vulnerableTimer = result.vulnerableTimer;
+        boss.pattern         = static_cast<uint8_t>(result.pattern);
+
+        if (boss.phase > oldPhase) {
+            // Window the player can punish / parry.
             m_audio.playAt(kSfxEnemyHit, transform.position);
             spawnTransientLight(transform.position, {1.f, 0.9f, 0.3f}, 8.f, 6.f, 0.4f);
             addTrauma(m_screenShake, 0.4f);
         }
-
-        if (boss.vulnerableTimer > 0.f) {
-            // During the vulnerable window the boss telegraphs (holds fire) and
-            // glows; the player can deal extra damage / parry incoming nothing.
-            boss.vulnerableTimer -= dt;
-            continue;
-        }
-
-        // Attack loop: count down, then fire a telegraphed pattern at the player.
-        boss.attackTimer -= dt;
-        if (boss.attackTimer > 0.f)
-            continue;
-
-        glm::vec3 toPlayer = m_camera.position - transform.position;
-        float dist         = glm::length(toPlayer);
-        glm::vec3 dir      = dist > 1e-4f ? toPlayer / dist : glm::vec3{0.f, 0.f, 1.f};
-        glm::vec3 muzzle   = transform.position + dir * 1.6f + glm::vec3{0.f, 0.5f, 0.f};
-
-        // Pattern escalates with the phase: a wider, faster volley each phase.
-        // Even patterns = a fan volley, odd = a faster straight burst (charge).
-        const int phase   = boss.phase;
-        const int pellets = 3 + phase * 2; // 3,5,7,...
-        const float speed = 14.f + static_cast<float>(phase) * 3.f;
-        const int damage  = 12 + phase * 4;
-
-        if ((boss.pattern & 1u) == 0u) {
-            // Fan volley: spread pellets in a horizontal arc toward the player.
-            glm::vec3 right     = glm::normalize(glm::cross(dir, glm::vec3{0.f, 1.f, 0.f}));
-            const float halfArc = 0.35f + static_cast<float>(phase) * 0.1f;
-            for (int i = 0; i < pellets; ++i) {
-                float t     = pellets > 1 ? (static_cast<float>(i) / static_cast<float>(pellets - 1)) * 2.f - 1.f : 0.f;
-                glm::vec3 d = glm::normalize(dir + right * (t * halfArc));
-                spawnEnemyProjectile(muzzle, d * speed, damage, boss.physicsBodyId);
-            }
-        } else {
-            // Charge burst: a tight, fast straight stream the player must dodge.
-            for (int i = 0; i < pellets; ++i)
-                spawnEnemyProjectile(muzzle + dir * (static_cast<float>(i) * 0.4f), dir * (speed * 1.4f), damage,
-                                     boss.physicsBodyId);
-        }
-
-        m_audio.playAt(kSfxWeaponFire, transform.position);
-        ++boss.pattern;
-        // Faster cadence in later phases.
-        boss.attackTimer = 2.2f - static_cast<float>(phase) * 0.4f;
-        if (boss.attackTimer < 0.6f)
-            boss.attackTimer = 0.6f;
+        if (boss.pattern != oldPattern)
+            m_audio.playAt(kSfxWeaponFire, transform.position);
     }
 }
 

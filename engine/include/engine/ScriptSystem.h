@@ -46,6 +46,22 @@ struct PickupCollect {
     int grant      = 0;
 };
 
+// Result of ds.boss.tick() (assets/scripts/boss.lua): the boss's current
+// phase and remaining vulnerable-window timer. Engine.cpp compares the
+// returned phase against the BossComponent's previous one to detect a
+// transition (and play the VFX/audio cue) and writes both back onto the
+// component.
+struct BossTickResult {
+    int phase             = 0;
+    float vulnerableTimer = 0.f;
+    // ds.boss.pattern after this tick. The caller compares it against the
+    // BossComponent's previous cached value to detect "did fire this tick"
+    // (pattern only increments when a volley/burst is actually fired), since
+    // there's no separate boolean flag for that — reusing the existing
+    // pattern-tracking field keeps the Lua return shape minimal.
+    int pattern = 0;
+};
+
 struct ScriptWaveConfig {
     int baseEnemies        = 3;
     int enemiesPerWave     = 2;
@@ -112,6 +128,11 @@ class ScriptSystem {
         std::function<void(uint32_t entity, std::string_view field, float value)> setEntityField;
         // ds.emit_event(name [, number]) -> game-side event sink.
         std::function<void(std::string_view name, double value)> emitEvent;
+        // ds.spawn_projectile(origin, velocity, damage, owner_body_id) -> spawns
+        // an enemy/boss-owned projectile entity (used by the boss attack
+        // patterns in assets/scripts/boss.lua).
+        std::function<void(const glm::vec3& origin, const glm::vec3& velocity, int damage, uint32_t ownerBodyId)>
+            spawnProjectile;
 
         CameraCallbacks camera;
         PlayerCallbacks player;
@@ -200,6 +221,14 @@ class ScriptSystem {
     // ds.wave.state.spawn_pending.
     void waveMarkSpawned(int aliveCount);
 
+    // --- Boss (assets/scripts/boss.lua, module ds.boss). ---------------------
+    // Lua owns phase-threshold computation and attack-pattern selection/
+    // cadence (firing pellets itself via ds.spawn_projectile); Engine.cpp keeps
+    // the EnTT/Jolt position sync and the entire death-handling block.
+    void bossReset();
+    BossTickResult bossTick(int health, int maxHealth, float dt, const glm::vec3& bossPos, const glm::vec3& playerPos,
+                             uint32_t bossBodyId);
+
     // Raw access for advanced callers / tests.
     lua_State* state() const { return m_state; }
 
@@ -224,6 +253,7 @@ class ScriptSystem {
     float invokeGetField(uint32_t entity, std::string_view field);
     void invokeSetField(uint32_t entity, std::string_view field, float value);
     void invokeEmit(std::string_view name, double value);
+    void invokeSpawnProjectile(const glm::vec3& origin, const glm::vec3& velocity, int damage, uint32_t ownerBodyId);
 
   private:
     // Pushes a C function onto the "ds" table under the given key. Used by init.

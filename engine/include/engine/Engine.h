@@ -1,7 +1,6 @@
 #pragma once
 
 #include "engine/AudioSystem.h"
-#include "engine/BossLogic.h"
 #include "engine/Camera.h"
 #include "engine/CombatFeedback.h"
 #include "engine/GameFeel.h"
@@ -329,7 +328,8 @@ class Engine {
     // an independent ds.<module> table.
     void initScripts();
     static constexpr const char* kScripts[] = {
-        "scripts/enemy_ai.lua", "scripts/wave.lua", "scripts/parry.lua", "scripts/pickups.lua", "scripts/hooks.lua",
+        "scripts/enemy_ai.lua", "scripts/wave.lua",    "scripts/boss.lua",
+        "scripts/parry.lua",    "scripts/pickups.lua", "scripts/hooks.lua",
     };
     uint32_t m_playerBodyId                  = 0;
     std::unique_ptr<PlayerController> m_player;

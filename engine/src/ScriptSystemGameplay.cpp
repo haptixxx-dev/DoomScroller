@@ -217,4 +217,29 @@ void ScriptSystem::waveMarkSpawned(int aliveCount) {
     callModuleFunction("wave", "mark_spawned", 1, 0);
 }
 
+void ScriptSystem::bossReset() {
+    if (!m_state)
+        return;
+    callModuleFunction("boss", "reset", 0, 0);
+}
+
+BossTickResult ScriptSystem::bossTick(int health, int maxHealth, float dt, const glm::vec3& bossPos,
+                                       const glm::vec3& playerPos, uint32_t bossBodyId) {
+    BossTickResult out{};
+    if (!m_state)
+        return out;
+    lua_pushinteger(m_state, health);
+    lua_pushinteger(m_state, maxHealth);
+    lua_pushnumber(m_state, static_cast<lua_Number>(dt));
+    lua::pushUserdata<glm::vec3>(m_state, bossPos);
+    lua::pushUserdata<glm::vec3>(m_state, playerPos);
+    lua_pushinteger(m_state, static_cast<lua_Integer>(bossBodyId));
+    callModuleFunction("boss", "tick", 6, 3);
+    out.phase           = static_cast<int>(lua_tointeger(m_state, -3));
+    out.vulnerableTimer = static_cast<float>(lua_tonumber(m_state, -2));
+    out.pattern         = static_cast<int>(lua_tointeger(m_state, -1));
+    lua_pop(m_state, 3);
+    return out;
+}
+
 } // namespace ds

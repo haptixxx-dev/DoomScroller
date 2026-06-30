@@ -78,6 +78,19 @@ int l_emit_event(lua_State* L) {
     return 0;
 }
 
+// ds.spawn_projectile(origin, velocity, damage, owner_body_id) -> spawns an
+// enemy/boss-owned projectile entity (used by boss.lua's attack patterns).
+int l_spawn_projectile(lua_State* L) {
+    ScriptSystem* self   = selfFromState(L);
+    glm::vec3* origin    = ds::lua::checkUserdata<glm::vec3>(L, 1);
+    glm::vec3* velocity  = ds::lua::checkUserdata<glm::vec3>(L, 2);
+    int damage           = static_cast<int>(luaL_checkinteger(L, 3));
+    uint32_t ownerBodyId = static_cast<uint32_t>(luaL_checkinteger(L, 4));
+    if (self && self->state())
+        self->invokeSpawnProjectile(*origin, *velocity, damage, ownerBodyId);
+    return 0;
+}
+
 // ds.set_wave_config(table) — store the table as the global ds.wave_config so
 // waveConfig() can read it back. Thin: just records data, no engine coupling.
 int l_set_wave_config(lua_State* L) {
@@ -132,6 +145,12 @@ void ScriptSystem::invokeSetField(uint32_t entity, std::string_view field, float
 void ScriptSystem::invokeEmit(std::string_view name, double value) {
     if (m_callbacks.emitEvent)
         m_callbacks.emitEvent(name, value);
+}
+
+void ScriptSystem::invokeSpawnProjectile(const glm::vec3& origin, const glm::vec3& velocity, int damage,
+                                          uint32_t ownerBodyId) {
+    if (m_callbacks.spawnProjectile)
+        m_callbacks.spawnProjectile(origin, velocity, damage, ownerBodyId);
 }
 
 ScriptSystem::ScriptSystem() = default;
@@ -196,6 +215,8 @@ void ScriptSystem::registerBindings() {
     lua_setfield(m_state, -2, "emit_event");
     lua_pushcfunction(m_state, l_set_wave_config);
     lua_setfield(m_state, -2, "set_wave_config");
+    lua_pushcfunction(m_state, l_spawn_projectile);
+    lua_setfield(m_state, -2, "spawn_projectile");
 
     lua_setglobal(m_state, "ds");
 }
