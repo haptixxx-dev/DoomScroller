@@ -1,5 +1,6 @@
 add_executable(ds_tests
     test_rhi_types.cpp
+    test_level_format.cpp
 )
 target_link_libraries(ds_tests PRIVATE engine_headers Catch2::Catch2WithMain)
 add_test(NAME ds_tests COMMAND ds_tests)
@@ -9,6 +10,24 @@ add_executable(ds_engine_tests
     test_transform.cpp
     test_camera.cpp
     test_components.cpp
+    test_particles.cpp
+    test_lights.cpp
+    test_movement.cpp
+    test_projectile.cpp
+    test_waves.cpp
 )
 target_link_libraries(ds_engine_tests PRIVATE engine_math engine_headers Catch2::Catch2WithMain)
 add_test(NAME ds_engine_tests COMMAND ds_engine_tests)
+
+# Lua scripting test: validates the lua link + binding plumbing. Compiles
+# ScriptSystem.cpp directly and links lua_static (+ SDL3 for SDL_Log* only) so
+# the test process avoids the full engine's Jolt/mimalloc global state.
+add_executable(ds_script_tests
+    test_scripting.cpp
+    ${CMAKE_SOURCE_DIR}/engine/src/ScriptSystem.cpp
+)
+target_link_libraries(ds_script_tests PRIVATE engine_headers lua_static SDL3::SDL3-static Catch2::Catch2WithMain)
+if(DS_DEV)
+    target_compile_definitions(ds_script_tests PRIVATE DS_DEV)
+endif()
+add_test(NAME ds_script_tests COMMAND ds_script_tests)

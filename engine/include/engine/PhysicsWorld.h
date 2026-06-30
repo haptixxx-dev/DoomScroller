@@ -1,7 +1,7 @@
 #pragma once
 
-#include <glm/glm.hpp>
 #include <cstdint>
+#include <glm/glm.hpp>
 #include <memory>
 
 namespace ds {
@@ -26,6 +26,7 @@ class PhysicsWorld {
     uint32_t addCapsule(float halfHeight, float radius, glm::vec3 position);
 
     glm::vec3 getPosition(uint32_t bodyId) const;
+    void setPosition(uint32_t bodyId, glm::vec3 position);
     glm::vec3 getLinearVelocity(uint32_t bodyId) const;
     void setLinearVelocity(uint32_t bodyId, glm::vec3 vel);
     void addImpulse(uint32_t bodyId, glm::vec3 impulse);
@@ -35,6 +36,10 @@ class PhysicsWorld {
     bool castRayDown(glm::vec3 origin, float dist, uint32_t excludeId) const;
     // Returns hit body ID, or UINT32_MAX if no hit within maxDist. Excludes excludeId.
     uint32_t castRay(glm::vec3 origin, glm::vec3 dir, float maxDist, uint32_t excludeId) const;
+
+    // Like castRay, but also writes the world-space hit point into outHitPoint
+    // when something is hit. outHitPoint is left untouched on a miss.
+    uint32_t castRay(glm::vec3 origin, glm::vec3 dir, float maxDist, uint32_t excludeId, glm::vec3& outHitPoint) const;
 
   private:
     struct Impl;

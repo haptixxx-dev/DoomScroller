@@ -1,0 +1,328 @@
+#include "engine/ScriptSystem.h"
+
+#include <SDL3/SDL_log.h>
+
+#include <lua.hpp>
+
+namespace ds {
+
+namespace {
+
+// Registry key under which we stash the owning ScriptSystem* so the C binding
+// trampolines can reach the C++ callbacks. Address-as-key is the idiomatic Lua
+// pattern for a unique light-userdata registry slot.
+char kSelfKey = 0;
+
+ScriptSystem* selfFromState(lua_State* L) {
+    lua_pushlightuserdata(L, &kSelfKey);
+    lua_gettable(L, LUA_REGISTRYINDEX);
+    auto* self = static_cast<ScriptSystem*>(lua_touserdata(L, -1));
+    lua_pop(L, 1);
+    return self;
+}
+
+// --- ds.* binding trampolines ------------------------------------------------
+
+// ds.spawn_enemy(x, y, z [, type]) -> entity id
+int l_spawn_enemy(lua_State* L) {
+    ScriptSystem* self = selfFromState(L);
+    float x            = static_cast<float>(luaL_checknumber(L, 1));
+    float y            = static_cast<float>(luaL_checknumber(L, 2));
+    float z            = static_cast<float>(luaL_checknumber(L, 3));
+    int type           = static_cast<int>(luaL_optinteger(L, 4, 0));
+    uint32_t id        = 0;
+    if (self && self->state())
+        id = self->invokeSpawn(x, y, z, type);
+    lua_pushinteger(L, static_cast<lua_Integer>(id));
+    return 1;
+}
+
+int l_get_field(lua_State* L) {
+    ScriptSystem* self = selfFromState(L);
+    uint32_t entity    = static_cast<uint32_t>(luaL_checkinteger(L, 1));
+    const char* field  = luaL_checkstring(L, 2);
+    float value        = 0.f;
+    if (self && self->state())
+        value = self->invokeGetField(entity, field);
+    lua_pushnumber(L, value);
+    return 1;
+}
+
+int l_set_field(lua_State* L) {
+    ScriptSystem* self = selfFromState(L);
+    uint32_t entity    = static_cast<uint32_t>(luaL_checkinteger(L, 1));
+    const char* field  = luaL_checkstring(L, 2);
+    float value        = static_cast<float>(luaL_checknumber(L, 3));
+    if (self && self->state())
+        self->invokeSetField(entity, field, value);
+    return 0;
+}
+
+int l_emit_event(lua_State* L) {
+    ScriptSystem* self = selfFromState(L);
+    const char* name   = luaL_checkstring(L, 1);
+    double value       = luaL_optnumber(L, 2, 0.0);
+    if (self && self->state())
+        self->invokeEmit(name, value);
+    return 0;
+}
+
+// ds.set_wave_config(table) — store the table as the global ds.wave_config so
+// waveConfig() can read it back. Thin: just records data, no engine coupling.
+int l_set_wave_config(lua_State* L) {
+    luaL_checktype(L, 1, LUA_TTABLE);
+    lua_getglobal(L, "ds");
+    lua_pushvalue(L, 1);
+    lua_setfield(L, -2, "wave_config");
+    lua_pop(L, 1); // ds
+    return 0;
+}
+
+// Reads an integer field from a table at `tableIdx`; leaves the table in place.
+int tableIntField(lua_State* L, int tableIdx, const char* key, int fallback, bool* found) {
+    lua_getfield(L, tableIdx, key);
+    int out = fallback;
+    if (lua_isnumber(L, -1)) {
+        out = static_cast<int>(lua_tointeger(L, -1));
+        if (found)
+            *found = true;
+    }
+    lua_pop(L, 1);
+    return out;
+}
+
+float tableFloatField(lua_State* L, int tableIdx, const char* key, float fallback, bool* found) {
+    lua_getfield(L, tableIdx, key);
+    float out = fallback;
+    if (lua_isnumber(L, -1)) {
+        out = static_cast<float>(lua_tonumber(L, -1));
+        if (found)
+            *found = true;
+    }
+    lua_pop(L, 1);
+    return out;
+}
+
+} // namespace
+
+uint32_t ScriptSystem::invokeSpawn(float x, float y, float z, int type) {
+    return m_callbacks.spawnEnemy ? m_callbacks.spawnEnemy(x, y, z, type) : 0u;
+}
+
+float ScriptSystem::invokeGetField(uint32_t entity, std::string_view field) {
+    return m_callbacks.getEntityField ? m_callbacks.getEntityField(entity, field) : 0.f;
+}
+
+void ScriptSystem::invokeSetField(uint32_t entity, std::string_view field, float value) {
+    if (m_callbacks.setEntityField)
+        m_callbacks.setEntityField(entity, field, value);
+}
+
+void ScriptSystem::invokeEmit(std::string_view name, double value) {
+    if (m_callbacks.emitEvent)
+        m_callbacks.emitEvent(name, value);
+}
+
+ScriptSystem::ScriptSystem() = default;
+
+ScriptSystem::~ScriptSystem() {
+    shutdown();
+}
+
+bool ScriptSystem::init(const Callbacks& callbacks) {
+    if (m_state)
+        shutdown();
+
+    m_callbacks = callbacks;
+    m_state     = luaL_newstate();
+    if (!m_state) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "ScriptSystem: failed to create Lua state");
+        return false;
+    }
+
+    // Open a curated set of standard libraries. The io/os libraries are a
+    // sandbox risk (file + process access), so only expose them under DS_DEV.
+    luaL_requiref(m_state, LUA_GNAME, luaopen_base, 1);
+    luaL_requiref(m_state, LUA_TABLIBNAME, luaopen_table, 1);
+    luaL_requiref(m_state, LUA_STRLIBNAME, luaopen_string, 1);
+    luaL_requiref(m_state, LUA_MATHLIBNAME, luaopen_math, 1);
+    lua_pop(m_state, 4);
+#ifdef DS_DEV
+    luaL_requiref(m_state, LUA_OSLIBNAME, luaopen_os, 1);
+    luaL_requiref(m_state, LUA_IOLIBNAME, luaopen_io, 1);
+    lua_pop(m_state, 2);
+#endif
+
+    // Stash `this` so trampolines can reach the callbacks.
+    lua_pushlightuserdata(m_state, &kSelfKey);
+    lua_pushlightuserdata(m_state, this);
+    lua_settable(m_state, LUA_REGISTRYINDEX);
+
+    registerBindings();
+    return true;
+}
+
+void ScriptSystem::shutdown() {
+    if (m_state) {
+        lua_close(m_state);
+        m_state = nullptr;
+    }
+}
+
+void ScriptSystem::registerBindings() {
+    // Build the global "ds" table of bindings.
+    lua_newtable(m_state);
+
+    lua_pushcfunction(m_state, l_spawn_enemy);
+    lua_setfield(m_state, -2, "spawn_enemy");
+    lua_pushcfunction(m_state, l_get_field);
+    lua_setfield(m_state, -2, "get_field");
+    lua_pushcfunction(m_state, l_set_field);
+    lua_setfield(m_state, -2, "set_field");
+    lua_pushcfunction(m_state, l_emit_event);
+    lua_setfield(m_state, -2, "emit_event");
+    lua_pushcfunction(m_state, l_set_wave_config);
+    lua_setfield(m_state, -2, "set_wave_config");
+
+    lua_setglobal(m_state, "ds");
+}
+
+bool ScriptSystem::loadFile(const std::string& path) {
+    if (!m_state)
+        return false;
+    m_lastFile = path;
+    if (luaL_dofile(m_state, path.c_str()) != LUA_OK) {
+        const char* err = lua_tostring(m_state, -1);
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "ScriptSystem: failed to run '%s': %s", path.c_str(),
+                    err ? err : "(unknown error)");
+        lua_pop(m_state, 1);
+        return false;
+    }
+    return true;
+}
+
+bool ScriptSystem::doString(const std::string& source, const char* chunkName) {
+    if (!m_state)
+        return false;
+    if (luaL_loadbuffer(m_state, source.data(), source.size(), chunkName) != LUA_OK ||
+        lua_pcall(m_state, 0, 0, 0) != LUA_OK) {
+        const char* err = lua_tostring(m_state, -1);
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "ScriptSystem: doString error: %s", err ? err : "(unknown error)");
+        lua_pop(m_state, 1);
+        return false;
+    }
+    return true;
+}
+
+bool ScriptSystem::reload() {
+#ifdef DS_DEV
+    if (m_lastFile.empty())
+        return false;
+    return loadFile(m_lastFile);
+#else
+    return false;
+#endif
+}
+
+ScriptEnemyStats ScriptSystem::enemyStats() const {
+    ScriptEnemyStats out{};
+    if (!m_state)
+        return out;
+    lua_getglobal(m_state, "ds");
+    if (!lua_istable(m_state, -1)) {
+        lua_pop(m_state, 1);
+        return out;
+    }
+    lua_getfield(m_state, -1, "enemy_stats");
+    if (lua_istable(m_state, -1)) {
+        int idx      = lua_gettop(m_state);
+        bool found   = false;
+        out.health   = tableIntField(m_state, idx, "health", out.health, &found);
+        out.speed    = tableFloatField(m_state, idx, "speed", out.speed, &found);
+        out.damage   = tableIntField(m_state, idx, "damage", out.damage, &found);
+        out.overrode = found;
+    }
+    lua_pop(m_state, 2); // enemy_stats + ds
+    return out;
+}
+
+ScriptWaveConfig ScriptSystem::waveConfig() const {
+    ScriptWaveConfig out{};
+    if (!m_state)
+        return out;
+    lua_getglobal(m_state, "ds");
+    if (!lua_istable(m_state, -1)) {
+        lua_pop(m_state, 1);
+        return out;
+    }
+    lua_getfield(m_state, -1, "wave_config");
+    if (lua_istable(m_state, -1)) {
+        int idx               = lua_gettop(m_state);
+        bool found            = false;
+        out.baseEnemies       = tableIntField(m_state, idx, "base_enemies", out.baseEnemies, &found);
+        out.enemiesPerWave    = tableIntField(m_state, idx, "enemies_per_wave", out.enemiesPerWave, &found);
+        out.maxEnemiesPerWave = tableIntField(m_state, idx, "max_enemies_per_wave", out.maxEnemiesPerWave, &found);
+        out.maxWaves          = tableIntField(m_state, idx, "max_waves", out.maxWaves, &found);
+        out.intermissionTime  = tableFloatField(m_state, idx, "intermission_time", out.intermissionTime, &found);
+        out.killScore         = tableIntField(m_state, idx, "kill_score", out.killScore, &found);
+        out.overrode          = found;
+    }
+    lua_pop(m_state, 2); // wave_config + ds
+    return out;
+}
+
+bool ScriptSystem::callGlobal(const char* name, int nargs) {
+    // Stack on entry: nargs args pushed on top. We need the function *below* them,
+    // so fetch it then rotate it under the args.
+    lua_getglobal(m_state, name);
+    if (!lua_isfunction(m_state, -1)) {
+        // Not defined: drop the non-function + the args we were given.
+        lua_pop(m_state, 1 + nargs);
+        return false;
+    }
+    // Move the function from the top to below the nargs arguments.
+    lua_insert(m_state, -(nargs + 1));
+    if (lua_pcall(m_state, nargs, 0, 0) != LUA_OK) {
+        const char* err = lua_tostring(m_state, -1);
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "ScriptSystem: error in '%s': %s", name,
+                    err ? err : "(unknown error)");
+        lua_pop(m_state, 1);
+        return false;
+    }
+    return true;
+}
+
+void ScriptSystem::onWaveStart(int wave) {
+    if (!m_state)
+        return;
+    lua_pushinteger(m_state, wave);
+    callGlobal("onWaveStart", 1);
+}
+
+void ScriptSystem::onEnemyDeath(uint32_t entity, float x, float y, float z) {
+    if (!m_state)
+        return;
+    lua_pushinteger(m_state, static_cast<lua_Integer>(entity));
+    lua_pushnumber(m_state, x);
+    lua_pushnumber(m_state, y);
+    lua_pushnumber(m_state, z);
+    callGlobal("onEnemyDeath", 4);
+}
+
+void ScriptSystem::onPlayerDeath(int finalScore) {
+    if (!m_state)
+        return;
+    lua_pushinteger(m_state, finalScore);
+    callGlobal("onPlayerDeath", 1);
+}
+
+double ScriptSystem::getGlobalNumber(const char* name, double fallback) const {
+    if (!m_state)
+        return fallback;
+    lua_getglobal(m_state, name);
+    double out = lua_isnumber(m_state, -1) ? lua_tonumber(m_state, -1) : fallback;
+    lua_pop(m_state, 1);
+    return out;
+}
+
+} // namespace ds
