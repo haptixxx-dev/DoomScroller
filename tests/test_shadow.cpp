@@ -113,3 +113,83 @@ TEST_CASE("Angled sun still covers the scene center in clip range", "[shadow]") 
     REQUIRE(ndc.z >= 0.f);
     REQUIRE(ndc.z <= 1.f);
 }
+
+// --- Point-light cube-face shadow matrices ---------------------------------
+
+TEST_CASE("cubeFaceDirection returns the 6 conventional axis directions", "[shadow][point]") {
+    REQUIRE(cubeFaceDirection(0) == glm::vec3{1.f, 0.f, 0.f});
+    REQUIRE(cubeFaceDirection(1) == glm::vec3{-1.f, 0.f, 0.f});
+    REQUIRE(cubeFaceDirection(2) == glm::vec3{0.f, 1.f, 0.f});
+    REQUIRE(cubeFaceDirection(3) == glm::vec3{0.f, -1.f, 0.f});
+    REQUIRE(cubeFaceDirection(4) == glm::vec3{0.f, 0.f, 1.f});
+    REQUIRE(cubeFaceDirection(5) == glm::vec3{0.f, 0.f, -1.f});
+}
+
+TEST_CASE("cubeFaceUp is never parallel to that face's direction", "[shadow][point]") {
+    for (int face = 0; face < 6; ++face) {
+        glm::vec3 dir = cubeFaceDirection(face);
+        glm::vec3 up  = cubeFaceUp(face);
+        // A degenerate (parallel) up reference would make lookAt's basis
+        // collapse (cross products go to zero) and poison the matrix with
+        // NaNs — exactly the failure mode sunLightSpaceMatrix's up-guard
+        // avoids for a straight-down sun.
+        REQUIRE(std::abs(glm::dot(glm::normalize(dir), glm::normalize(up))) < 0.99f);
+    }
+}
+
+TEST_CASE("pointShadowFaceMatrix: a point straight ahead on each face projects near clip center",
+          "[shadow][point]") {
+    glm::vec3 lightPos{2.f, 3.f, -1.f};
+    constexpr float kNear = 0.1f;
+    constexpr float kFar  = 20.f;
+
+    for (int face = 0; face < 6; ++face) {
+        glm::mat4 ls = pointShadowFaceMatrix(lightPos, face, kNear, kFar);
+        // A point 5 units straight ahead along this face's direction.
+        glm::vec3 aheadPoint = lightPos + cubeFaceDirection(face) * 5.f;
+        glm::vec4 clip       = worldToShadowUV(ls, aheadPoint);
+        REQUIRE(clip.w > 0.f); // in front of the eye
+        glm::vec3 ndc = glm::vec3(clip) / clip.w;
+
+        REQUIRE(ndc.x == Approx(0.f).margin(1e-3f));
+        REQUIRE(ndc.y == Approx(0.f).margin(1e-3f));
+        REQUIRE(ndc.z >= 0.f);
+        REQUIRE(ndc.z <= 1.f);
+    }
+}
+
+TEST_CASE("pointShadowFaceMatrix: adjacent faces disagree on a point straight ahead of one of them",
+          "[shadow][point]") {
+    // A point directly ahead of face 0 (+X) should project OUTSIDE the
+    // [-1,1] clip range (or behind the eye) on face 2's (+Y) frustum, since
+    // it's a 90-degree-FOV frustum pointed along a different axis. This is
+    // the property that makes per-face textures actually distinguish which
+    // face a fragment belongs to, rather than all reading the same map.
+    glm::vec3 lightPos{0.f, 0.f, 0.f};
+    constexpr float kNear = 0.1f;
+    constexpr float kFar  = 20.f;
+
+    glm::mat4 faceYLightSpace = pointShadowFaceMatrix(lightPos, 2, kNear, kFar);
+    glm::vec3 pointAheadOfX   = lightPos + cubeFaceDirection(0) * 5.f; // (5,0,0)
+    glm::vec4 clip            = worldToShadowUV(faceYLightSpace, pointAheadOfX);
+
+    bool behindEye = clip.w <= 0.f;
+    bool outsideXY = false;
+    if (!behindEye) {
+        glm::vec3 ndc = glm::vec3(clip) / clip.w;
+        outsideXY     = std::abs(ndc.x) > 1.f || std::abs(ndc.y) > 1.f;
+    }
+    REQUIRE((behindEye || outsideXY));
+}
+
+TEST_CASE("pointShadowFaceMatrix is finite for every face", "[shadow][point]") {
+    glm::vec3 lightPos{1.f, 2.f, 3.f};
+    for (int face = 0; face < 6; ++face) {
+        glm::mat4 ls = pointShadowFaceMatrix(lightPos, face, 0.1f, 25.f);
+        for (int col = 0; col < 4; ++col) {
+            for (int row = 0; row < 4; ++row) {
+                REQUIRE(std::isfinite(ls[col][row]));
+            }
+        }
+    }
+}
