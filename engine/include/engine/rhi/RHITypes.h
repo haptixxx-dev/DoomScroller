@@ -60,6 +60,12 @@ enum class TextureFormat {
 enum class ShaderStage { Vertex, Fragment, Compute };
 enum class ShaderFormat { SPIRV, MSL, DXIL };
 
+// Base dimensionality of a texture (task 59). Tex2D is the historical default and
+// reproduces the pre-59 behaviour byte-for-byte; TexCube (6 faces) and Tex2DArray
+// (arrayLayers slices) unlock point-light cube shadows and the multi-light shadow
+// array. Purely additive — existing 2D textures never set anything but Tex2D.
+enum class TextureType : uint8_t { Tex2D, TexCube, Tex2DArray };
+
 enum class PrimitiveTopology { TriangleList, TriangleStrip, LineList };
 enum class IndexType { Uint16, Uint32 };
 enum class CullMode { None, Front, Back };
@@ -94,10 +100,16 @@ struct BufferDesc {
 };
 
 struct TextureDesc {
-    uint32_t width        = 1;
-    uint32_t height       = 1;
-    uint32_t depth        = 1;
-    uint32_t mipLevels    = 1;
+    uint32_t width     = 1;
+    uint32_t height    = 1;
+    uint32_t depth     = 1;
+    uint32_t mipLevels = 1;
+    // Dimensionality + slice count (task 59, additive). Defaults reproduce the
+    // pre-59 2D single-layer behaviour exactly. For TexCube the backend uses 6
+    // faces; for Tex2DArray it uses `arrayLayers` slices; for Tex2D it keeps
+    // using `depth` as before.
+    TextureType type      = TextureType::Tex2D;
+    uint32_t arrayLayers  = 1;
     TextureFormat format  = TextureFormat::RGBA8Unorm;
     bool isRenderTarget   = false;
     bool isDepthStencil   = false;
@@ -199,6 +211,12 @@ struct ColorAttachment {
     LoadOp loadOp       = LoadOp::Clear;
     StoreOp storeOp     = StoreOp::Store;
     float clearColor[4] = {0.0f, 0.0f, 0.0f, 1.0f};
+    // Target sub-resource (task 59, additive): render into layer/face `layer` and
+    // mip `mipLevel` of the texture. Default 0/0 targets the first layer at mip 0,
+    // i.e. the pre-59 behaviour. `layer` selects the array slice on a Tex2DArray
+    // or the face (0..5) on a TexCube.
+    uint32_t layer    = 0;
+    uint32_t mipLevel = 0;
 };
 
 struct DepthAttachment {
@@ -207,6 +225,10 @@ struct DepthAttachment {
     StoreOp storeOp      = StoreOp::DontCare;
     float clearDepth     = 1.0f;
     uint8_t clearStencil = 0;
+    // Target sub-resource (task 59, additive): default 0/0 preserves current
+    // behaviour. See ColorAttachment above.
+    uint32_t layer    = 0;
+    uint32_t mipLevel = 0;
 };
 
 struct RenderPassDesc {

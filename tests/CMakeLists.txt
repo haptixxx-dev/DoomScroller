@@ -50,6 +50,7 @@ add_executable(ds_engine_tests
     test_material_table.cpp
     test_texture_readback.cpp
     test_capture_config.cpp
+    test_cluster.cpp
 )
 target_link_libraries(ds_engine_tests PRIVATE engine_math engine_headers Catch2::Catch2WithMain)
 add_test(NAME ds_engine_tests COMMAND ds_engine_tests)

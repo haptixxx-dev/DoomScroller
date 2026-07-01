@@ -205,13 +205,35 @@ RHITexture SDL3Device::createTexture(const TextureDesc& desc) {
             usage |= SDL_GPU_TEXTUREUSAGE_COLOR_TARGET;
     }
 
+    // Map the (task-59, additive) texture type. layer_count_or_depth means
+    // different things per type: a cube is always 6 faces; a 2D array uses
+    // arrayLayers slices; a plain 2D keeps using depth exactly as before, so the
+    // default (Tex2D + arrayLayers==1) reproduces the pre-59 behaviour.
+    SDL_GPUTextureType sdlType = SDL_GPU_TEXTURETYPE_2D;
+    Uint32 layerCountOrDepth   = desc.depth;
+    switch (desc.type) {
+    case TextureType::TexCube:
+        sdlType           = SDL_GPU_TEXTURETYPE_CUBE;
+        layerCountOrDepth = 6; // SDL requires exactly 6 faces for a cube
+        break;
+    case TextureType::Tex2DArray:
+        sdlType           = SDL_GPU_TEXTURETYPE_2D_ARRAY;
+        layerCountOrDepth = desc.arrayLayers;
+        break;
+    case TextureType::Tex2D:
+    default:
+        sdlType           = SDL_GPU_TEXTURETYPE_2D;
+        layerCountOrDepth = desc.depth;
+        break;
+    }
+
     SDL_GPUTextureCreateInfo info{};
-    info.type                 = SDL_GPU_TEXTURETYPE_2D;
+    info.type                 = sdlType;
     info.format               = toSDLFormat(desc.format);
     info.usage                = usage;
     info.width                = desc.width;
     info.height               = desc.height;
-    info.layer_count_or_depth = desc.depth;
+    info.layer_count_or_depth = layerCountOrDepth;
     info.num_levels           = desc.mipLevels;
 
     SDL_GPUTexture* tex = SDL_CreateGPUTexture(m_gpu, &info);
@@ -750,6 +772,11 @@ void SDL3CommandList::beginRenderPass(const RenderPassDesc& desc) {
                                                       : SDL_GPU_LOADOP_DONT_CARE;
         ci.store_op    = att.storeOp == StoreOp::Store ? SDL_GPU_STOREOP_STORE : SDL_GPU_STOREOP_DONT_CARE;
         ci.clear_color = {att.clearColor[0], att.clearColor[1], att.clearColor[2], att.clearColor[3]};
+        // Sub-resource targeting (task 59, additive). Default 0/0 == the pre-59
+        // behaviour (first layer/face, mip 0). layer_or_depth_plane is the array
+        // slice on a 2D-array target and the face (0..5) on a cube target.
+        ci.mip_level            = att.mipLevel;
+        ci.layer_or_depth_plane = att.layer;
         colorInfos.push_back(ci);
     }
 
@@ -761,7 +788,11 @@ void SDL3CommandList::beginRenderPass(const RenderPassDesc& desc) {
         depthInfo.load_op     = da.loadOp == LoadOp::Clear ? SDL_GPU_LOADOP_CLEAR : SDL_GPU_LOADOP_LOAD;
         depthInfo.store_op    = da.storeOp == StoreOp::Store ? SDL_GPU_STOREOP_STORE : SDL_GPU_STOREOP_DONT_CARE;
         depthInfo.clear_depth = da.clearDepth;
-        depthPtr              = &depthInfo;
+        // Sub-resource targeting (task 59, additive). These SDL fields are Uint8;
+        // default 0/0 == the pre-59 behaviour (first layer, mip 0).
+        depthInfo.mip_level = static_cast<Uint8>(da.mipLevel);
+        depthInfo.layer     = static_cast<Uint8>(da.layer);
+        depthPtr            = &depthInfo;
     }
 
     m_renderPass = SDL_BeginGPURenderPass(m_cmd, colorInfos.data(), static_cast<uint32_t>(colorInfos.size()), depthPtr);
