@@ -102,4 +102,54 @@ inline QualityProfile profileForCaps(const ds::rhi::RHICaps& caps) {
     return profileForTier(selectTier(caps));
 }
 
+// ---------------------------------------------------------------------------
+// Sanitize raw device-query values into a trustworthy RHICaps before tier
+// selection (task 55 pre-work). A native/SDL3 VRAM+feature query can return
+// implausible values (a driver reporting VRAM as UINT64_MAX, or feature bits
+// set on a device whose maxTextureDim is absurdly small — a sign the query
+// itself is unreliable). This pure normalizer defends selectTier from that
+// garbage; the actual query stays engine-side (out of scope here).
+//
+// Rules:
+//   * VRAM above a sane ceiling (1 TiB) is treated as "unknown" -> 0, so a
+//     bogus huge value cannot force Enhanced.
+//   * If maxTextureDim is 0 (query clearly failed to populate), the feature
+//     bits are not trusted and are cleared, and VRAM is zeroed -> conservative
+//     Minimum. A real device always reports a nonzero max texture dimension.
+//   * Otherwise the values pass through unchanged.
+//
+// NOTE: this deliberately does NOT gate Enhanced on a VRAM floor combined with
+// the feature bits. Today deviceVRAMBytes is a stub 0 (see PLAN task 55), so a
+// hard "feature AND VRAM>=floor" rule would starve the Enhanced path on real
+// mesh-shader hardware until the VRAM query lands. selectTier keeps the
+// feature-OR-VRAM rule; this sanitizer only removes clearly-invalid inputs.
+// Gate predicate for the Enhanced-tier mesh-shader render path (task 57). The
+// path is used only when BOTH the chosen profile is Enhanced AND the device
+// actually advertises mesh shaders — a device can clear the Enhanced VRAM
+// threshold (so profile.tier == Enhanced) without supporting mesh shaders, in
+// which case the classic vertex path must be used. Pure predicate; the actual
+// mesh pipeline (via nativeDevice()) + a cross-compilable mesh_ms shader are
+// bench/GPU work (Slang compiles a mesh stage to SPIRV here, but the Metal
+// backend rejects the naive form and DXIL needs dxc — so authoring a shader
+// that ships on all three backends is deferred to the hardware pass).
+inline bool useMeshShaders(const QualityProfile& profile, const ds::rhi::RHICaps& caps) {
+    return profile.tier == QualityTier::Enhanced && caps.meshShaders;
+}
+
+constexpr uint64_t kMaxPlausibleVRAM = 1024ull * 1024ull * 1024ull * 1024ull; // 1 TiB
+
+inline ds::rhi::RHICaps capsFromRawQuery(ds::rhi::RHICaps raw) {
+    if (raw.deviceVRAMBytes > kMaxPlausibleVRAM) {
+        raw.deviceVRAMBytes = 0; // implausible -> unknown
+    }
+    if (raw.maxTextureDim == 0u) {
+        // Query did not populate; do not trust any capability it reported.
+        raw.meshShaders     = false;
+        raw.bindless        = false;
+        raw.rayTracing      = false;
+        raw.deviceVRAMBytes = 0;
+    }
+    return raw;
+}
+
 } // namespace ds

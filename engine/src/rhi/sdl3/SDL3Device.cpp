@@ -1,5 +1,7 @@
 #include "SDL3Device.h"
 
+#include "engine/rhi/TextureReadback.h"
+
 #include <cstring>
 #include <stdexcept>
 #include <string>
@@ -586,8 +588,14 @@ void SDL3Device::uploadImmediateTexture(RHITexture dst, const void* data, uint64
     SDL_ReleaseGPUTransferBuffer(m_gpu, tb);
 }
 
-void SDL3Device::debugDownloadTexture(RHITexture tex, uint32_t w, uint32_t h, const char* path) {
-    const uint32_t bytes = w * h * 4;
+void SDL3Device::debugDownloadTexture(RHITexture tex, uint32_t w, uint32_t h, TextureFormat fmt, const char* path) {
+    // Size the download by the SOURCE format's bytes/texel, not a hardcoded 4.
+    const uint32_t bpp = bytesPerPixel(fmt);
+    if (bpp == 0u) {
+        SDL_Log("[capture] unsupported readback format for %s", path);
+        return;
+    }
+    const uint32_t bytes = w * h * bpp;
     SDL_GPUTransferBufferCreateInfo tbInfo{};
     tbInfo.usage              = SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD;
     tbInfo.size               = bytes;
@@ -615,30 +623,25 @@ void SDL3Device::debugDownloadTexture(RHITexture tex, uint32_t w, uint32_t h, co
     sdlCheck(mapped != nullptr, "debug MapGPUTransferBuffer");
     const uint8_t* px = static_cast<const uint8_t*>(mapped);
 
-    bool isBGRA      = (SDL_GetGPUSwapchainTextureFormat(m_gpu, m_window) == SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM);
+    // Convert to RGB8 by the SOURCE format (handles the RGBA/BGRA swizzle and
+    // RGBA16Float/R32Float decode) — the pure ds::rhi::convertToRgb8.
+    const std::vector<uint8_t> rgb = convertToRgb8(px, static_cast<std::size_t>(w) * h, fmt);
+    SDL_UnmapGPUTransferBuffer(m_gpu, tb);
+    SDL_ReleaseGPUTransferBuffer(m_gpu, tb);
+
+    if (rgb.empty()) {
+        SDL_Log("[capture] no RGB payload produced for %s", path);
+        return;
+    }
     SDL_IOStream* io = SDL_IOFromFile(path, "wb");
     if (io) {
         char header[64];
         int hn = SDL_snprintf(header, sizeof(header), "P6\n%u %u\n255\n", w, h);
         SDL_WriteIO(io, header, hn);
-        std::vector<uint8_t> rgb(w * h * 3);
-        for (uint32_t i = 0; i < w * h; ++i) {
-            uint8_t r = px[i * 4 + 0], g = px[i * 4 + 1], b = px[i * 4 + 2];
-            if (isBGRA) {
-                uint8_t t = r;
-                r         = b;
-                b         = t;
-            }
-            rgb[i * 3 + 0] = r;
-            rgb[i * 3 + 1] = g;
-            rgb[i * 3 + 2] = b;
-        }
         SDL_WriteIO(io, rgb.data(), rgb.size());
         SDL_CloseIO(io);
-        SDL_Log("[capture] wrote %s (%ux%u, %s)", path, w, h, isBGRA ? "BGRA" : "RGBA");
+        SDL_Log("[capture] wrote %s (%ux%u, %u bpp)", path, w, h, bpp);
     }
-    SDL_UnmapGPUTransferBuffer(m_gpu, tb);
-    SDL_ReleaseGPUTransferBuffer(m_gpu, tb);
 }
 
 // ---------------------------------------------------------------------------
