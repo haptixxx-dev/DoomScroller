@@ -172,3 +172,37 @@ if(DOXYGEN_FOUND)
         VERBATIM
     )
 endif()
+
+# ---------------------------------------------------------------------------
+# CPack per-OS packaging (task 50 pre-work).
+#
+# Configures the packaging generators so `cpack` (after a build+install) emits a
+# distributable archive per platform. This lands the CONFIG only — running the
+# generators + a validated render to ship is the bench-side of task 50. Keeping
+# the config in-tree means a packaging misconfiguration surfaces at CMake
+# configure time (headless) rather than at release time. The install() rules in
+# game/CMakeLists.txt define the staged layout (exe + assets/ + shaders/).
+set(CPACK_PACKAGE_NAME "DoomScroller")
+set(CPACK_PACKAGE_VENDOR "DoomScroller")
+set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Fast 3D arena FPS")
+# Our game staging is a `game` CPack component. KNOWN REFINEMENT (bench-side
+# task 50): the vendored Lua/mimalloc subprojects register unconditional
+# component-less install() rules (headers, static libs, cmake config), so the
+# archive currently also carries an include/ lib/ share/ tree alongside the
+# runnable DoomScroller + assets/ + shaders/ layout. The game IS runnable from
+# the package as-is; trimming the dev artifacts needs either submodule install
+# suppression or a bespoke install-script, which is deferred to the real
+# per-OS packaging pass (.app / AppImage / installer) rather than done here.
+set(CPACK_COMPONENTS_ALL game)
+set(CPACK_COMPONENTS_GROUPING ALL_COMPONENTS_IN_ONE)
+if(WIN32)
+    set(CPACK_GENERATOR "ZIP")
+elseif(APPLE)
+    # Drag-install .dmg; the .app bundle + Info.plist + Metal shader staging is
+    # the bench-side refinement (task 50), this gives a shippable archive shape.
+    set(CPACK_GENERATOR "DragNDrop;TGZ")
+else()
+    set(CPACK_GENERATOR "TGZ")
+endif()
+include(CPack)
