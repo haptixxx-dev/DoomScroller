@@ -2851,9 +2851,52 @@ void Engine::render() {
 // m_device/render and is compile-only-verified here. The bench must run
 // --capture, eyeball the PPMs, and commit them (docs/phase4-bench-plan.md 48).
 // -----------------------------------------------------------------------------
-bool Engine::captureFrame(const char* outPpmPath) {
+void Engine::setupCaptureScene(CaptureScene scene) {
+    // Deterministically stage the scene state so the captured frame exercises
+    // the intended render features WITHOUT any wall-clock / RNG / input (a
+    // golden reference must be byte-reproducible). We never call update() here
+    // (its dt comes from SDL_GetPerformanceCounter and it reads live keyboard +
+    // steps physics); instead we drive the specific systems the frame needs
+    // with a FIXED dt.
+    if (scene == CaptureScene::Startup) {
+        // The as-constructed arena + Menu backdrop, first frame. Nothing to do.
+        return;
+    }
+    // CaptureScene::Arena: start a run (spawns the wave's enemies + their lights
+    // and positions the player), then stage a deterministic emissive burst so
+    // HDR rolloff / bloom / dynamic point light / live particles are all in the
+    // frame. startGame() bumps totalRuns and touches save-adjacent run state,
+    // which is acceptable for an offline one-shot capture process that exits
+    // immediately after (it never persists).
+    startGame();
+
+    // A fixed muzzle-flash burst + a bright transient light in front of the
+    // player's eye — a known emissive above the bloom threshold, at a fixed
+    // position, no RNG. MuzzleFlash is additive yellow-white (glows), which is
+    // exactly what the bloom bright-pass should pick up.
+    const glm::vec3 eye     = m_player ? m_player->eyePosition() : m_camera.position;
+    const glm::vec3 forward = m_camera.front();
+    const glm::vec3 muzzle  = eye + forward * 1.5f;
+    m_particles.emit(ParticleSystem::Effect::MuzzleFlash, muzzle, forward, 32);
+    m_particles.emit(ParticleSystem::Effect::Explosion, muzzle + forward * 2.f, forward, 48);
+    spawnTransientLight(muzzle, {1.f, 0.85f, 0.5f}, 6.f, 4.f, 100.f); // long-lived for the capture
+
+    // Tick the particle sim + light decay a fixed number of fixed-dt steps so
+    // the particles spread into a visible plume (not a single-point spawn) and
+    // the transient light is gathered into m_lightBuffer. 8 steps @ 1/60 s.
+    constexpr float kCaptureDt   = 1.f / 60.f;
+    constexpr int kCaptureFrames = 8;
+    for (int i = 0; i < kCaptureFrames; ++i) {
+        m_particles.update(kCaptureDt);
+        updateLights(kCaptureDt);
+    }
+}
+
+bool Engine::captureFrame(CaptureScene scene, const char* outPpmPath) {
     if (outPpmPath == nullptr || m_windowWidth <= 0 || m_windowHeight <= 0)
         return false;
+
+    setupCaptureScene(scene);
 
     const uint32_t w = static_cast<uint32_t>(m_windowWidth);
     const uint32_t h = static_cast<uint32_t>(m_windowHeight);
@@ -2903,7 +2946,7 @@ std::string Engine::captureScene(CaptureScene scene, std::string_view dir) {
             backend = captureBackendFromDriver(driver);
     }
     const std::string path = captureOutputPath(dir, scene, backend);
-    if (!captureFrame(path.c_str()))
+    if (!captureFrame(scene, path.c_str()))
         return {};
     return path;
 }

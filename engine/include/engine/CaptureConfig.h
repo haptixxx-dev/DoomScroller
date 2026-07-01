@@ -32,11 +32,19 @@ namespace ds {
 // a wave spawned deterministically) without reworking the filename scheme.
 enum class CaptureScene {
     Startup, // arena + Menu overlay, first frame, no update() ticked
+    Arena,   // game started (wave spawned, lights live) + a deterministic
+             // emissive burst + transient light, ticked a fixed number of
+             // fixed-dt frames so HDR rolloff, bloom, dynamic point lights,
+             // sun shadows and live particles are all actually exercised.
+             // The bench's startup golden proved the pipeline but truth-tested
+             // NONE of the 5 render features (empty menu backdrop); this scene
+             // exists to fix that (see docs/bench-task48-verdict.md).
 };
 
 // All capture scenes, in a fixed order. Kept in sync with CaptureScene.
-inline constexpr std::array<CaptureScene, 1> kCaptureScenes = {
+inline constexpr std::array<CaptureScene, 2> kCaptureScenes = {
     CaptureScene::Startup,
+    CaptureScene::Arena,
 };
 
 // Stable, lower-case, filesystem-safe identifier for a scene. Used verbatim in
@@ -45,6 +53,8 @@ inline constexpr std::string_view captureSceneName(CaptureScene scene) {
     switch (scene) {
     case CaptureScene::Startup:
         return "startup";
+    case CaptureScene::Arena:
+        return "arena";
     }
     return "unknown";
 }
