@@ -32,6 +32,31 @@
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
         "DS_PROFILE": "ON"
       }
+    },
+    {
+      "name": "ci-linux",
+      "displayName": "CI (Linux: gcc + ccache + mold)",
+      "inherits": "release",
+      "cacheVariables": {
+        "CMAKE_C_COMPILER_LAUNCHER": "ccache",
+        "CMAKE_CXX_COMPILER_LAUNCHER": "ccache",
+        "CMAKE_EXE_LINKER_FLAGS": "-fuse-ld=mold",
+        "CMAKE_SHARED_LINKER_FLAGS": "-fuse-ld=mold"
+      }
+    },
+    {
+      "name": "ci-macos",
+      "displayName": "CI (macOS: AppleClang + ccache)",
+      "inherits": "release",
+      "cacheVariables": {
+        "CMAKE_C_COMPILER_LAUNCHER": "ccache",
+        "CMAKE_CXX_COMPILER_LAUNCHER": "ccache"
+      }
+    },
+    {
+      "name": "ci-windows",
+      "displayName": "CI (Windows: MSVC)",
+      "inherits": "release"
     }
   ],
   "buildPresets": [
@@ -46,6 +71,18 @@
     {
       "name": "profile",
       "configurePreset": "profile"
+    },
+    {
+      "name": "ci-linux",
+      "configurePreset": "ci-linux"
+    },
+    {
+      "name": "ci-macos",
+      "configurePreset": "ci-macos"
+    },
+    {
+      "name": "ci-windows",
+      "configurePreset": "ci-windows"
     }
   ]
 }

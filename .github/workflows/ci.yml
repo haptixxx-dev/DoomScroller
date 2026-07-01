@@ -22,11 +22,11 @@ jobs:
       matrix:
         include:
           - os: ubuntu-latest
-            cmake_extra: -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+            preset: ci-linux
           - os: macos-latest
-            cmake_extra: -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+            preset: ci-macos
           - os: windows-latest
-            cmake_extra: ""
+            preset: ci-windows
 
     steps:
       - uses: actions/checkout@v4
@@ -39,6 +39,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             clang clang-tidy \
+            mold \
             libwayland-dev libxkbcommon-dev wayland-protocols \
             libx11-dev libxext-dev libxrandr-dev libxcursor-dev \
             libxi-dev libxinerama-dev libxxf86vm-dev libxss-dev \
@@ -76,16 +77,16 @@ jobs:
           key: slang-${{ runner.os }}-2026.12
 
       - name: Configure
-        run: cmake --preset release ${{ matrix.cmake_extra }}
+        run: cmake --preset ${{ matrix.preset }}
 
       - name: Build
-        run: cmake --build --preset release --parallel
+        run: cmake --build --preset ${{ matrix.preset }} --parallel
 
       # Build the offline tools explicitly so a tool link break is attributed to
       # a named step (they are also part of `all`, so the step above already
       # compiles them; this is for failure isolation + clarity).
       - name: Build offline tools
-        run: cmake --build --preset release --target level_convert asset_cook --parallel
+        run: cmake --build --preset ${{ matrix.preset }} --target level_convert asset_cook --parallel
 
       # Runs all ctest suites INCLUDING the ds_smoke headless smoke target
       # (registered as a ctest in tests/CMakeLists.txt), which constructs the
