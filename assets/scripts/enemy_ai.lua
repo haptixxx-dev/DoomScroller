@@ -16,16 +16,18 @@ ds.enemy_stats = {
 -- can't see).
 ds.enemy_ai = {}
 
--- archetype: 0=Grunt 1=Charger 2=Ranged (mirrors EnemyArchetype).
+-- archetype: 0=Grunt 1=Charger 2=Ranged 3=Brute 4=Spitter (mirrors EnemyArchetype).
 -- state: 0=Idle 1=Chase 2=Attack (mirrors EnemyComponent::State).
+-- Brute reuses the Grunt melee FSM branch; Spitter reuses the Ranged branch.
 local ARCHETYPE_GRUNT, ARCHETYPE_CHARGER, ARCHETYPE_RANGED = 0, 1, 2
+local ARCHETYPE_BRUTE, ARCHETYPE_SPITTER = 3, 4
 local STATE_IDLE, STATE_CHASE, STATE_ATTACK = 0, 1, 2
 
 --- Per-frame FSM tick for one enemy. attack_cooldown is the CALLER-decremented
 -- cooldown (the dt subtraction already happened in EnemySystem.cpp, matching
 -- the original C++ flow); this function only reads it, never decrements it
 -- further.
--- @param archetype 0=Grunt 1=Charger 2=Ranged (mirrors EnemyArchetype)
+-- @param archetype 0=Grunt 1=Charger 2=Ranged 3=Brute 4=Spitter (mirrors EnemyArchetype)
 -- @param state 0=Idle 1=Chase 2=Attack (mirrors EnemyComponent::State)
 -- @param dist current distance to the player
 -- @param attack_cooldown caller-decremented attack cooldown remaining
@@ -42,7 +44,9 @@ local STATE_IDLE, STATE_CHASE, STATE_ATTACK = 0, 1, 2
 --   boolean lunge, boolean fire_projectile, boolean melee_attack, boolean arm_windup
 function ds.enemy_ai.tick(archetype, state, dist, attack_cooldown, move_speed, attack_range, detection_range,
                            attack_interval, charge_windup, charge_speed)
-    local ranged = archetype == ARCHETYPE_RANGED
+    -- Spitter shares the Ranged FSM branch; Brute (and everything else) falls
+    -- through to the Grunt melee branch.
+    local ranged = archetype == ARCHETYPE_RANGED or archetype == ARCHETYPE_SPITTER
     local charger = archetype == ARCHETYPE_CHARGER
 
     if state == STATE_IDLE then
@@ -97,16 +101,38 @@ function ds.enemy_ai.tick(archetype, state, dist, attack_cooldown, move_speed, a
 end
 
 --- Deterministic archetype pick for a wave-spawned enemy: wave 1 is all
--- Grunts; from wave 2 mix in Chargers; from wave 3 add Ranged.
+-- Grunts; from wave 2 mix in Chargers; from wave 3 add Ranged; from wave 4 add
+-- Brutes; from wave 5 add Spitters. Same (wave, spawn_index) always yields the
+-- same archetype.
 -- @param wave 1-based wave number
 -- @param spawn_index index of this spawn within the wave
--- @return integer archetype (0=Grunt 1=Charger 2=Ranged)
+-- @return integer archetype (0=Grunt 1=Charger 2=Ranged 3=Brute 4=Spitter)
 function ds.enemy_ai.archetype_for_wave(wave, spawn_index)
     if wave <= 1 then
         return ARCHETYPE_GRUNT
     end
-    local sel = (wave + spawn_index) % 3
-    if wave >= 3 and sel == 2 then
+    -- Waves 2-3 keep the original 3-slot rotation (Grunt / Charger / Ranged) so
+    -- their spawn mix is unchanged. Wave 4+ widens to a 5-slot pool that also
+    -- fields Brutes (wave >= 4) and Spitters (wave >= 5).
+    if wave < 4 then
+        local sel = (wave + spawn_index) % 3
+        if wave >= 3 and sel == 2 then
+            return ARCHETYPE_RANGED
+        end
+        if sel == 1 then
+            return ARCHETYPE_CHARGER
+        end
+        return ARCHETYPE_GRUNT
+    end
+
+    local sel = (wave + spawn_index) % 5
+    if sel == 4 and wave >= 5 then
+        return ARCHETYPE_SPITTER
+    end
+    if sel == 3 then
+        return ARCHETYPE_BRUTE
+    end
+    if sel == 2 then
         return ARCHETYPE_RANGED
     end
     if sel == 1 then

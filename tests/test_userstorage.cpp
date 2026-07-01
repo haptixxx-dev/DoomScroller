@@ -1,3 +1,4 @@
+#include "engine/MetaProgression.h"
 #include "engine/UserStorage.h"
 
 #include <catch2/catch_approx.hpp>
@@ -116,6 +117,34 @@ TEST_CASE("saveGame/loadGame round-trips a SaveData", "[userstorage]") {
     REQUIRE(out->totalRuns == in.totalRuns);
     REQUIRE(out->unlockFlags == in.unlockFlags);
     REQUIRE(out->bestCombo == in.bestCombo);
+}
+
+TEST_CASE("saveGame/loadGame preserves named unlock bits and v2 fields", "[userstorage]") {
+    ScopedTestDir guard;
+
+    SaveData in{};
+    in.bestWave   = 8;
+    in.highScore  = 54321;
+    in.totalKills = 999;
+    in.bestCombo  = 30;
+    in.currency   = 750;
+    in.difficulty = 2;
+    setUnlock(in, Unlock::AltFire);
+    setUnlock(in, Unlock::HardMode);
+
+    REQUIRE(saveGame(guard.dir, in));
+
+    const std::optional<SaveData> out = loadGame(guard.dir);
+    REQUIRE(out.has_value());
+    REQUIRE(isUnlocked(*out, Unlock::AltFire));
+    REQUIRE(isUnlocked(*out, Unlock::HardMode));
+    REQUIRE_FALSE(isUnlocked(*out, Unlock::ExtraWeapon));
+    REQUIRE(out->bestWave == in.bestWave);
+    REQUIRE(out->highScore == in.highScore);
+    REQUIRE(out->totalKills == in.totalKills);
+    REQUIRE(out->bestCombo == in.bestCombo);
+    REQUIRE(out->currency == in.currency);
+    REQUIRE(out->difficulty == in.difficulty);
 }
 
 TEST_CASE("reading missing files yields nullopt", "[userstorage]") {

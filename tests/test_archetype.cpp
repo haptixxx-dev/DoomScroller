@@ -83,3 +83,49 @@ TEST_CASE("EnemyComponent archetype defaults to Grunt", "[archetype]") {
     REQUIRE(e.chargeSpeed == 0.f);
     REQUIRE(e.projectileSpeed == 0.f);
 }
+
+// Task 54: Brute (tanky/slow melee) and Spitter (fast/fragile burst ranged).
+TEST_CASE("archetypeDefaults Brute is tankier and slower than a Grunt", "[archetype]") {
+    ArchetypeStats grunt = archetypeDefaults(EnemyArchetype::Grunt);
+    ArchetypeStats brute = archetypeDefaults(EnemyArchetype::Brute);
+
+    REQUIRE(brute.health > grunt.health);             // very tanky
+    REQUIRE(brute.moveSpeed < grunt.moveSpeed);       // slow
+    REQUIRE(brute.projectileSpeed == 0.f);            // melee only
+    REQUIRE(brute.chargeWindup == 0.f);               // not a charger
+    REQUIRE(brute.attackDamage > grunt.attackDamage); // heavy hits
+}
+
+TEST_CASE("archetypeDefaults Spitter fires faster than a Ranged", "[archetype]") {
+    ArchetypeStats ranged  = archetypeDefaults(EnemyArchetype::Ranged);
+    ArchetypeStats spitter = archetypeDefaults(EnemyArchetype::Spitter);
+
+    REQUIRE(spitter.projectileSpeed > 0.f);                  // fires projectiles
+    REQUIRE(spitter.attackInterval < ranged.attackInterval); // shorter interval = burst
+    REQUIRE(spitter.health < ranged.health);                 // fragile
+    REQUIRE(spitter.moveSpeed > ranged.moveSpeed);           // fast
+}
+
+TEST_CASE("applyArchetype round-trips the new archetypes", "[archetype]") {
+    {
+        EnemyComponent e;
+        ArchetypeStats brute = archetypeDefaults(EnemyArchetype::Brute);
+        applyArchetype(e, EnemyArchetype::Brute);
+        REQUIRE(e.archetype == EnemyArchetype::Brute);
+        REQUIRE(e.health == brute.health);
+        REQUIRE(e.moveSpeed == Catch::Approx(brute.moveSpeed));
+        REQUIRE(e.attackDamage == brute.attackDamage);
+        REQUIRE(e.attackInterval == Catch::Approx(brute.attackInterval));
+        REQUIRE(e.projectileSpeed == Catch::Approx(brute.projectileSpeed));
+    }
+    {
+        EnemyComponent e;
+        ArchetypeStats spitter = archetypeDefaults(EnemyArchetype::Spitter);
+        applyArchetype(e, EnemyArchetype::Spitter);
+        REQUIRE(e.archetype == EnemyArchetype::Spitter);
+        REQUIRE(e.health == spitter.health);
+        REQUIRE(e.moveSpeed == Catch::Approx(spitter.moveSpeed));
+        REQUIRE(e.attackInterval == Catch::Approx(spitter.attackInterval));
+        REQUIRE(e.projectileSpeed == Catch::Approx(spitter.projectileSpeed));
+    }
+}

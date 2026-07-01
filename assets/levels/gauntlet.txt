@@ -1,0 +1,36 @@
+# DoomScroller — "Gauntlet": a long, narrow corridor of escalating threats.
+# A 10x5x40 hall with staggered pillars; enemies queue down the length so the
+# player fights forward through grunts into chargers and a ranged backline.
+#
+# Convert with:  level_convert gauntlet.dslv gauntlet.txt
+#
+# Grammar (see engine/LevelTextParser.h):
+#   box   cx cy cz   hx hy hz   r g b
+#   spawn x y z      player|enemy   [grunt|charger|ranged]
+#   light x y z      r g b      radius intensity
+
+# --- geometry: floor, ceiling, four walls (W=5 H=5 D=20, T=0.1) ---------------
+box   0     -0.1   0       5    0.1   20     1 1 1        # floor
+box   0      5.1   0       5    0.1   20     1 1 1        # ceiling
+box   0      2.5  -20.1    5    2.5    0.1   1 1 1        # far wall
+box   0      2.5   20.1    5    2.5    0.1   1 1 1        # near wall
+box  -5.1    2.5   0       0.1  2.5   20     1 1 1        # west wall
+box   5.1    2.5   0       0.1  2.5   20     1 1 1        # east wall
+
+# --- pillars: staggered cover down the corridor -------------------------------
+box  -2.5    2.5  -5       0.5  2.5    0.5   0.5 0.5 0.55 # pillar 1
+box   2.5    2.5   0       0.5  2.5    0.5   0.5 0.5 0.55 # pillar 2
+box  -2.5    2.5   5       0.5  2.5    0.5   0.5 0.5 0.55 # pillar 3
+
+# --- spawns: player at the near end, escalating queue toward the far wall -----
+spawn   0    1.7   16     player
+spawn   0    1.5   6      enemy   grunt
+spawn  -2    1.5   0      enemy   grunt
+spawn   2    1.5  -6      enemy   charger
+spawn  -2    1.5  -11     enemy   charger
+spawn   0    1.5  -17     enemy   ranged
+
+# --- lighting: a marching row of dim lamps down the hall -----------------------
+light   0    4.5   12     1 0.95 0.9   16 1.0
+light   0    4.5   0      1 0.95 0.9   16 1.0
+light   0    4.5  -12     1 0.9  0.8   16 1.0

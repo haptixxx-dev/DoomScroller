@@ -115,6 +115,44 @@ TEST_CASE("ds.boss.tick fires the expected pellet count and alternates pattern",
     (void)afterFirst;
 }
 
+// Task 54: a third RADIAL BURST pattern. The selector is now pattern % 3, so
+// the pattern index advances 0 -> 1 -> 2 across successive shots, and the
+// radial branch (slot 2) fires exactly `pellets` projectiles for the phase.
+TEST_CASE("ds.boss.tick cycles three patterns; radial fires exactly pellets", "[scripting][boss]") {
+    ScriptSystem scripts;
+    ScriptSystem::Callbacks cb{};
+    int fireCount      = 0;
+    cb.spawnProjectile = [&](const glm::vec3&, const glm::vec3&, int, uint32_t) { ++fireCount; };
+
+    REQUIRE(scripts.init(cb));
+    REQUIRE(scripts.loadFile(std::string(DS_ASSETS_DIR) + "/scripts/boss.lua"));
+
+    const glm::vec3 bossPos{0.f, 0.f, 0.f};
+    const glm::vec3 playerPos{0.f, 0.f, 10.f};
+
+    // Phase 0 -> pellets = 3 + 0*2 = 3, the same count for all three patterns.
+    // Shot 1 fires with pattern slot 0 (fan) and leaves ds.boss.pattern == 1.
+    fireCount = 0;
+    scripts.bossTick(2000, 2000, 2.1f, bossPos, playerPos, 1u);
+    REQUIRE(fireCount == 3);
+    REQUIRE(scripts.doString("__p = ds.boss.pattern"));
+    REQUIRE(scripts.getGlobalNumber("__p") == 1.0);
+
+    // Shot 2 fires with slot 1 (charge burst), pattern -> 2.
+    fireCount = 0;
+    scripts.bossTick(2000, 2000, 3.f, bossPos, playerPos, 1u);
+    REQUIRE(fireCount == 3);
+    REQUIRE(scripts.doString("__p = ds.boss.pattern"));
+    REQUIRE(scripts.getGlobalNumber("__p") == 2.0);
+
+    // Shot 3 fires with slot 2 (radial burst): a full ring of exactly `pellets`.
+    fireCount = 0;
+    scripts.bossTick(2000, 2000, 3.f, bossPos, playerPos, 1u);
+    REQUIRE(fireCount == 3);                        // radial ring of pellets (== 3 at phase 0)
+    REQUIRE(scripts.doString("__p = ds.boss.pattern"));
+    REQUIRE(scripts.getGlobalNumber("__p") == 3.0); // wraps back to slot 0 (3 % 3)
+}
+
 TEST_CASE("boss wrappers are graceful when boss.lua never loaded", "[scripting][boss]") {
     ScriptSystem scripts;
     REQUIRE(scripts.init());

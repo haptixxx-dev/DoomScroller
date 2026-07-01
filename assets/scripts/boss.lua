@@ -10,7 +10,8 @@ ds.boss = {
     phase = 0,
     vulnerable_timer = 0,
     attack_timer = 2.0, -- brief grace before the first volley (mirrors spawnBoss())
-    pattern = 0, -- 0 = fan volley, 1 = charge burst (alternates each shot)
+    pattern = 0, -- monotonically increments per shot; pattern%3 selects the
+    -- attack: 0 = fan volley, 1 = charge burst, 2 = radial burst.
 }
 
 local thresholds = { 0.66, 0.33, 0.0 }
@@ -92,7 +93,8 @@ function ds.boss.tick(health, max_health, dt, boss_pos, player_pos, boss_body_id
     local speed = 14.0 + phase * 3.0
     local damage = 12 + phase * 4
 
-    if ds.boss.pattern % 2 == 0 then
+    local slot = ds.boss.pattern % 3
+    if slot == 0 then
         -- Fan volley: spread pellets in a horizontal arc toward the player.
         local right = dir:cross(Vec3.new(0, 1, 0)):normalize()
         local half_arc = 0.35 + phase * 0.1
@@ -104,10 +106,19 @@ function ds.boss.tick(health, max_health, dt, boss_pos, player_pos, boss_body_id
             local d = (dir + right * (t * half_arc)):normalize()
             ds.spawn_projectile(muzzle, d * speed, damage, boss_body_id)
         end
-    else
+    elseif slot == 1 then
         -- Charge burst: a tight, fast straight stream the player must dodge.
         for i = 0, pellets - 1 do
             ds.spawn_projectile(muzzle + dir * (i * 0.4), dir * (speed * 1.4), damage, boss_body_id)
+        end
+    else
+        -- Radial burst: a full ring of pellets in the horizontal plane, spraying
+        -- outward in every direction (no safe angle behind the player).
+        local right = dir:cross(Vec3.new(0, 1, 0)):normalize()
+        for i = 0, pellets - 1 do
+            local ang = (i / pellets) * (2 * math.pi)
+            local d = (dir * math.cos(ang) + right * math.sin(ang)):normalize()
+            ds.spawn_projectile(muzzle, d * speed, damage, boss_body_id)
         end
     end
 

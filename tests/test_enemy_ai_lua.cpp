@@ -10,6 +10,8 @@ namespace {
 constexpr int kGrunt   = 0;
 constexpr int kCharger = 1;
 constexpr int kRanged  = 2;
+constexpr int kBrute   = 3;
+constexpr int kSpitter = 4;
 
 constexpr int kIdle   = 0;
 constexpr int kChase  = 1;
@@ -33,6 +35,18 @@ EnemyAIDecision tickCharger(ScriptSystem& scripts, int state, float dist, float 
 
 EnemyAIDecision tickRanged(ScriptSystem& scripts, int state, float dist, float cooldown) {
     return scripts.enemyAITick(kRanged, state, dist, cooldown, 2.f, 12.f, 22.f, 1.f, 0.f, 0.f);
+}
+
+// Brute uses the melee FSM branch (EnemyArchetype.h Brute defaults: moveSpeed 2,
+// attackRange 2, detectionRange 16, attackInterval 1.8, no charge/projectile).
+EnemyAIDecision tickBrute(ScriptSystem& scripts, int state, float dist, float cooldown) {
+    return scripts.enemyAITick(kBrute, state, dist, cooldown, 2.f, 2.f, 16.f, 1.8f, 0.f, 0.f);
+}
+
+// Spitter uses the ranged FSM branch (Spitter defaults: moveSpeed 4,
+// attackRange 11, detectionRange 22, attackInterval 0.6, projectileSpeed 22).
+EnemyAIDecision tickSpitter(ScriptSystem& scripts, int state, float dist, float cooldown) {
+    return scripts.enemyAITick(kSpitter, state, dist, cooldown, 4.f, 11.f, 22.f, 0.6f, 0.f, 0.f);
 }
 
 } // namespace
@@ -187,6 +201,94 @@ TEST_CASE("ds.enemy_ai.archetype_for_wave is deterministic and escalates", "[scr
             sawRanged3 = true;
     }
     REQUIRE(sawRanged3);
+}
+
+// Task 54: Brute reuses the melee FSM, Spitter reuses the ranged FSM.
+TEST_CASE("ds.enemy_ai Brute follows the melee FSM like a Grunt", "[scripting][enemy_ai]") {
+    ScriptSystem scripts;
+    loadEnemyAiScript(scripts);
+
+    // Enters attack range without arming a charger windup (melee, not charger).
+    EnemyAIDecision enter = tickBrute(scripts, kChase, 1.5f, 0.f); // within attackRange(2)
+    REQUIRE(enter.state == kAttack);
+    REQUIRE_FALSE(enter.armWindup);
+    REQUIRE_FALSE(enter.lunge);
+
+    // In range with cooldown elapsed: melee attack, velocity zeroed, no projectile.
+    EnemyAIDecision melee = tickBrute(scripts, kAttack, 1.5f, 0.f);
+    REQUIRE(melee.meleeAttack);
+    REQUIRE_FALSE(melee.fireProjectile);
+    REQUIRE(melee.setVelocity);
+    REQUIRE(melee.moveIntent == 0.f);
+
+    // Out of range from Attack: back to Chase, still zeroing velocity (grunt path).
+    EnemyAIDecision out = tickBrute(scripts, kAttack, 5.f, 0.f);
+    REQUIRE(out.state == kChase);
+    REQUIRE(out.setVelocity);
+    REQUIRE_FALSE(out.meleeAttack);
+}
+
+TEST_CASE("ds.enemy_ai Spitter follows the ranged FSM and fires projectiles", "[scripting][enemy_ai]") {
+    ScriptSystem scripts;
+    loadEnemyAiScript(scripts);
+
+    // attackRange=11, half=5.5. Close in: retreat and fire.
+    EnemyAIDecision retreat = tickSpitter(scripts, kAttack, 3.f, 0.f);
+    REQUIRE(retreat.setVelocity);
+    REQUIRE(retreat.moveIntent == -1.f);
+    REQUIRE(retreat.fireProjectile);
+    REQUIRE_FALSE(retreat.meleeAttack);
+
+    // Mid: hold and fire on cooldown-elapsed.
+    EnemyAIDecision hold = tickSpitter(scripts, kAttack, 8.f, 0.f);
+    REQUIRE(hold.moveIntent == 0.f);
+    REQUIRE(hold.fireProjectile);
+
+    // On cooldown: no fire.
+    EnemyAIDecision onCd = tickSpitter(scripts, kAttack, 8.f, 0.3f);
+    REQUIRE_FALSE(onCd.fireProjectile);
+
+    // Out of range: back to Chase, leaves velocity untouched (ranged path).
+    EnemyAIDecision out = tickSpitter(scripts, kAttack, 30.f, 0.f);
+    REQUIRE(out.state == kChase);
+    REQUIRE_FALSE(out.setVelocity);
+    REQUIRE_FALSE(out.fireProjectile);
+}
+
+// Task 54: archetype_for_wave gates Brute (wave >= 4) and Spitter (wave >= 5).
+TEST_CASE("ds.enemy_ai.archetype_for_wave gates Brute and Spitter by wave", "[scripting][enemy_ai]") {
+    ScriptSystem scripts;
+    loadEnemyAiScript(scripts);
+
+    // Determinism holds for the new families too.
+    REQUIRE(scripts.archetypeForWave(5, 4) == scripts.archetypeForWave(5, 4));
+
+    // Waves 1-3 never field Brute or Spitter.
+    for (int w = 1; w <= 3; ++w) {
+        for (int i = 0; i < 12; ++i) {
+            const int a = scripts.archetypeForWave(w, i);
+            REQUIRE(a != kBrute);
+            REQUIRE(a != kSpitter);
+        }
+    }
+
+    // Wave 4: Brute can appear, Spitter cannot yet.
+    bool sawBrute4 = false;
+    for (int i = 0; i < 12; ++i) {
+        const int a = scripts.archetypeForWave(4, i);
+        REQUIRE(a != kSpitter);
+        if (a == kBrute)
+            sawBrute4 = true;
+    }
+    REQUIRE(sawBrute4);
+
+    // Wave 5+: Spitter can appear.
+    bool sawSpitter5 = false;
+    for (int i = 0; i < 12; ++i) {
+        if (scripts.archetypeForWave(5, i) == kSpitter)
+            sawSpitter5 = true;
+    }
+    REQUIRE(sawSpitter5);
 }
 
 TEST_CASE("enemy AI wrapper is graceful when enemy_ai.lua never loaded", "[scripting][enemy_ai]") {
