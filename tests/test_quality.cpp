@@ -137,6 +137,36 @@ TEST_CASE("capsFromRawQuery passes valid caps through unchanged", "[quality]") {
     REQUIRE(selectTier(s) == QualityTier::Enhanced);
 }
 
+TEST_CASE("conservative device-query caps resolve to Minimum (task 55)", "[quality]") {
+    // Mirrors exactly what SDL3Device::queryCaps produces on real hardware:
+    // SDL3 GPU exposes no VRAM/mesh/bindless query and no reachable native
+    // handle, so the device path reports a populated maxTextureDim with the
+    // three feature signals left at their conservative defaults. That must
+    // sanitize + select to Minimum — never over-promising Enhanced.
+    ds::rhi::RHICaps deviceRaw{};
+    deviceRaw.maxTextureDim     = 16384; // populated -> the query ran
+    deviceRaw.maxPushConstBytes = 128;
+    deviceRaw.deviceVRAMBytes   = 0;     // SDL3 has no VRAM query
+    deviceRaw.meshShaders       = false; // no query / no native handle
+    deviceRaw.bindless          = false; // no query / no native handle
+    deviceRaw.rayTracing        = false;
+
+    const ds::rhi::RHICaps s = capsFromRawQuery(deviceRaw);
+    // The sanitizer must NOT invent capability: a populated but featureless
+    // query passes through unchanged.
+    REQUIRE(s.deviceVRAMBytes == 0u);
+    REQUIRE(s.meshShaders == false);
+    REQUIRE(s.bindless == false);
+    REQUIRE(s.maxTextureDim == 16384u);
+
+    REQUIRE(selectTier(s) == QualityTier::Minimum);
+    const QualityProfile p = profileForCaps(s);
+    REQUIRE(p.tier == QualityTier::Minimum);
+    REQUIRE(p.shadows == false);
+    REQUIRE(p.computeParticles == false);
+    REQUIRE_FALSE(useMeshShaders(p, s));
+}
+
 TEST_CASE("useMeshShaders requires Enhanced tier AND the mesh-shader cap", "[quality]") {
     // Enhanced by VRAM alone, but the device lacks mesh shaders -> classic path.
     ds::rhi::RHICaps vramOnly{};
