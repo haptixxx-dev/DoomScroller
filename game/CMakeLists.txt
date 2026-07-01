@@ -40,6 +40,52 @@ if(APPLE)
 endif()
 
 # ---------------------------------------------------------------------------
+# Build-tree runnability: stage shaders + assets NEXT TO the exe after link.
+#
+# In non-DEV builds (release/profile — DS_DEV OFF) ds::paths::shaders()/assets()
+# resolve BINARY-relative (resourceRoot()/shaders, resourceRoot()/assets — see
+# engine/src/Paths.cpp). That layout is normally only produced by `cmake
+# --install` (the install() rules below) / CPack, so a raw build-tree release
+# binary crashes at launch ("ShaderLoader: cannot open .../bin/shaders/
+# mesh.vertex.spv"). This POST_BUILD copy mirrors the compiled shaders
+# (${CMAKE_BINARY_DIR}/shaders, produced by the ds_compile_slang targets) and
+# the source assets/ into the exe's own dir so the build-tree binary finds them
+# binary-relative, exactly like shipping mode — no extra install step needed.
+#
+# This is ADDITIVE and build-tree only: it does not touch the install()/CPack
+# staging below, and it is harmless (just redundant) for DS_DEV/debug, which
+# reads shaders from DS_BINARY_DIR/shaders and assets from the source tree.
+#
+# copy_directory (not _if_different) is used for portability down to the
+# declared cmake_minimum_required (3.25); _if_different only exists since 3.26.
+# The shader/asset trees are small, so the unconditional re-copy is negligible.
+#
+# Depend on the shader compile targets so the .spv/.msl/.dxil exist before we
+# copy them (DS_SHADER_TARGETS is populated by ds_compile_slang in the root
+# CMakeLists.txt).
+add_dependencies(DoomScroller ${DS_SHADER_TARGETS})
+
+if(APPLE)
+    # macOS .app bundle: $<TARGET_FILE_DIR:DoomScroller> resolves inside
+    # DoomScroller.app/Contents/MacOS, and resourceRoot() (Paths.cpp) redirects
+    # a Contents/MacOS exe to the sibling Contents/Resources. Stage there so the
+    # build-tree bundle is runnable in place too, matching the install() layout.
+    set(_ds_stage_root "$<TARGET_FILE_DIR:DoomScroller>/../Resources")
+else()
+    # Windows / Linux flat layout: resourceRoot() == the exe's own dir.
+    set(_ds_stage_root "$<TARGET_FILE_DIR:DoomScroller>")
+endif()
+
+add_custom_command(TARGET DoomScroller POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${CMAKE_BINARY_DIR}/shaders" "${_ds_stage_root}/shaders"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${CMAKE_SOURCE_DIR}/assets" "${_ds_stage_root}/assets"
+    COMMENT "Staging shaders/ + assets/ next to DoomScroller for build-tree runs"
+    VERBATIM
+)
+
+# ---------------------------------------------------------------------------
 # Install / packaging staging (task 50).
 # Stages the exe + assets + compiled shaders into the binary-RELATIVE layout
 # ds::paths expects in shipping mode (DS_DEV OFF): ds::paths::assets()/shaders()

@@ -115,6 +115,11 @@ endif()
 # is the one that GPU will use, so recompile to that format.
 list(GET _shader_targets 0 DS_PRIMARY_SHADER_TARGET)
 
+# DS_SHADER_TARGETS collects the custom-target name from each ds_compile_slang
+# batch. game/CMakeLists.txt add_dependencies() the DoomScroller exe on these so
+# its POST_BUILD shader-staging copy runs only after the .spv/.msl/.dxil exist.
+set(DS_SHADER_TARGETS "")
+
 ds_compile_slang(
     SOURCES   ${CMAKE_SOURCE_DIR}/shaders/triangle.slang
               ${CMAKE_SOURCE_DIR}/shaders/mesh.slang
@@ -129,6 +134,7 @@ ds_compile_slang(
     TARGETS   ${_shader_targets}
     OUT_DIR   "${_shader_out}"
 )
+list(APPEND DS_SHADER_TARGETS "${DS_SHADER_TARGET}")
 
 # Compute shaders (task 39): a separate invocation with the compute stage
 # (entry compMain). Shares the same output dir; CompileSlang.cmake tags the
@@ -140,6 +146,7 @@ ds_compile_slang(
     TARGETS   ${_shader_targets}
     OUT_DIR   "${_shader_out}"
 )
+list(APPEND DS_SHADER_TARGETS "${DS_SHADER_TARGET}")
 
 # ---------------------------------------------------------------------------
 # Catch2 (unit tests)

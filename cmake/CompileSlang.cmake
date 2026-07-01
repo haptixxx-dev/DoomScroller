@@ -75,7 +75,11 @@ function(ds_compile_slang)
     string(REGEX REPLACE "[^a-zA-Z0-9_]" "_" _tgt_name "shaders_${_stage_tag}_${ARG_OUT_DIR}")
     add_custom_target("${_tgt_name}" ALL DEPENDS ${_all_outputs})
 
-    # Export output list and directory for callers
+    # Export output list, directory, and the custom-target name for callers.
+    # DS_SHADER_TARGET lets a consumer add_dependencies() onto the compile step
+    # without re-deriving the sanitized name (the name is a function of OUT_DIR
+    # and the stage list, both of which are internal here).
     set(DS_COMPILED_SHADERS "${_all_outputs}" PARENT_SCOPE)
     set(DS_SHADER_OUT_DIR   "${ARG_OUT_DIR}"  PARENT_SCOPE)
+    set(DS_SHADER_TARGET    "${_tgt_name}"    PARENT_SCOPE)
 endfunction()
