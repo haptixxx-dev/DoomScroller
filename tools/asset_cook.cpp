@@ -1,28 +1,29 @@
 // asset_cook — offline texture cooker that emits a .dstex container.
 //
-//   asset_cook <input.png> <output.dstex>
+//   asset_cook <input.png> <output.dstex> [--rgba8]
 //
 // Loads an image (PNG/JPG/TGA/... anything stb_image decodes) as 8-bit RGBA and
-// writes it into the versioned DSTX container (engine/TextureFormatDstex.h) as an
-// uncompressed RGBA8 payload (format = 0).
+// writes it into the versioned DSTX container (engine/TextureFormatDstex.h).
 //
-// BC7 SEAM (documented TODO)
-// --------------------------
-// The intended cooked form is BC7 block-compressed (format = 1, 16 bytes per
-// 4x4 block, ~4x smaller than RGBA8). A real BC7 encoder (e.g. bc7enc/ispc) is a
-// heavy external we deliberately do NOT pull into the build yet. Until that
-// submodule lands, the cook emits the RGBA8 payload unchanged — a valid first
-// cut the engine can already consume. When the encoder is added, compress the
-// RGBA8 pixels to a BC7 block stream here and set header.format = BC7; the
-// container layout and reader (parseDstex) need no change.
+// By default the payload is BC7 block-compressed (format = 1, 16 bytes per 4x4
+// block, ~4x smaller than RGBA8) via the vendored bc7enc encoder. Pass --rgba8
+// to emit the uncompressed RGBA8 payload instead (format = 0) — useful for the
+// DS_DEV runtime fallback / debugging, or on assets the BC7 path should skip.
+//
+// The BC7 block layout + edge padding lives in the pure, unit-tested
+// engine/Bc7Cook.h; this tool injects the bc7enc-backed per-block compressor.
+// The container layout and reader (parseDstex) are unchanged across formats.
 
+#include "engine/Bc7Cook.h"
 #include "engine/TextureFormatDstex.h"
 
-#include <stb_image.h>
-
+#include <bc7enc.h>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <span>
+#include <stb_image.h>
+#include <string>
 #include <vector>
 
 using namespace ds;
@@ -35,7 +36,7 @@ bool writeFile(const char* path, std::span<const uint8_t> bytes) {
         return false;
     }
     const std::size_t wrote = bytes.empty() ? 0 : std::fwrite(bytes.data(), 1, bytes.size(), f);
-    const bool ok          = (wrote == bytes.size());
+    const bool ok           = (wrote == bytes.size());
     std::fclose(f);
     return ok;
 }
@@ -43,13 +44,22 @@ bool writeFile(const char* path, std::span<const uint8_t> bytes) {
 } // namespace
 
 int main(int argc, char** argv) {
-    if (argc != 3) {
-        std::fprintf(stderr, "usage: %s <input.png> <output.dstex>\n", argv[0]);
+    const char* inPath  = nullptr;
+    const char* outPath = nullptr;
+    bool useBc7         = true;
+    for (int i = 1; i < argc; ++i) {
+        if (std::strcmp(argv[i], "--rgba8") == 0) {
+            useBc7 = false;
+        } else if (inPath == nullptr) {
+            inPath = argv[i];
+        } else if (outPath == nullptr) {
+            outPath = argv[i];
+        }
+    }
+    if (inPath == nullptr || outPath == nullptr) {
+        std::fprintf(stderr, "usage: %s <input.png> <output.dstex> [--rgba8]\n", argv[0]);
         return 2;
     }
-
-    const char* inPath  = argv[1];
-    const char* outPath = argv[2];
 
     int width    = 0;
     int height   = 0;
@@ -66,15 +76,36 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    const std::size_t payloadBytes = static_cast<std::size_t>(width) * static_cast<std::size_t>(height) * 4u;
-    std::span<const uint8_t> payload{reinterpret_cast<const uint8_t*>(pixels), payloadBytes};
+    const auto w = static_cast<uint32_t>(width);
+    const auto h = static_cast<uint32_t>(height);
+
+    std::vector<uint8_t> payload;
+    DstexFormat format = DstexFormat::RGBA8;
+    if (useBc7) {
+        // Initialise the bc7enc encoder once, then compress each padded 4x4
+        // tile. Linear (non-perceptual) weights keep the cook deterministic and
+        // suitable for both color and data textures.
+        bc7enc_compress_block_init();
+        bc7enc_compress_block_params params;
+        bc7enc_compress_block_params_init(&params);
+        bc7enc_compress_block_params_init_linear_weights(&params);
+
+        payload = bc7Cook(
+            reinterpret_cast<const uint8_t*>(pixels), w, h,
+            [&params](const uint8_t tile[64], uint8_t block[16]) { bc7enc_compress_block(block, tile, &params); });
+        format = DstexFormat::BC7;
+    } else {
+        const std::size_t rgbaBytes = static_cast<std::size_t>(w) * h * 4u;
+        payload.assign(pixels, pixels + rgbaBytes);
+        format = DstexFormat::RGBA8;
+    }
 
     DstexHeader header{};
-    header.width     = static_cast<uint32_t>(width);
-    header.height    = static_cast<uint32_t>(height);
+    header.width     = w;
+    header.height    = h;
     header.mipLevels = 1;
-    header.format    = static_cast<uint32_t>(DstexFormat::RGBA8);
-    header.dataSize  = static_cast<uint32_t>(payloadBytes);
+    header.format    = static_cast<uint32_t>(format);
+    header.dataSize  = static_cast<uint32_t>(payload.size());
 
     const std::vector<uint8_t> blob = serializeDstex(header, payload);
     stbi_image_free(pixels);
@@ -84,6 +115,7 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    std::printf("asset_cook: wrote %s (%dx%d RGBA8, %zu bytes payload)\n", outPath, width, height, payloadBytes);
+    std::printf("asset_cook: wrote %s (%ux%u %s, %zu bytes payload)\n", outPath, w, h, useBc7 ? "BC7" : "RGBA8",
+                payload.size());
     return 0;
 }

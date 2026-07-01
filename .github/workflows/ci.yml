@@ -106,7 +106,15 @@ jobs:
           mkdir -p build/release/cooked
           "$TOOLS/level_convert" build/release/cooked/arena.dslv assets/levels/arena.txt
           cmp assets/levels/arena.dslv build/release/cooked/arena.dslv
+          # BC7 (default) cook — exercises the bc7enc encoder headlessly.
           "$TOOLS/asset_cook" assets/textures/sample.png build/release/cooked/sample.dstex
+          # RGBA8 fallback cook — the --rgba8 path used for DS_DEV/unsupported.
+          "$TOOLS/asset_cook" assets/textures/sample.png build/release/cooked/sample_rgba8.dstex --rgba8
+          # The BC7 payload must be ~4x smaller than the RGBA8 one.
+          BC7=$(stat -c%s build/release/cooked/sample.dstex)
+          RGBA=$(stat -c%s build/release/cooked/sample_rgba8.dstex)
+          echo "cooked sizes: BC7=$BC7 RGBA8=$RGBA"
+          test "$BC7" -lt "$RGBA"
 
       - name: Upload build artifacts
         if: always()

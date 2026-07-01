@@ -31,3 +31,6 @@
 [submodule "extern/catch2"]
 	path = extern/catch2
 	url = https://github.com/catchorg/Catch2.git
+[submodule "extern/bc7enc_rdo"]
+	path = extern/bc7enc_rdo
+	url = https://github.com/richgel999/bc7enc_rdo.git

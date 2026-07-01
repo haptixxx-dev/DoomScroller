@@ -50,6 +50,13 @@ add_executable(ds_engine_tests
 target_link_libraries(ds_engine_tests PRIVATE engine_math engine_headers Catch2::Catch2WithMain)
 add_test(NAME ds_engine_tests COMMAND ds_engine_tests)
 
+# BC7 cook round-trip test (task 56): links the vendored bc7enc encoder +
+# bc7decomp decoder and the pure Bc7Cook.h layout helper, so it truth-tests the
+# CPU compression path (encode -> decode -> PSNR) without a GPU. No SDL3/Jolt.
+add_executable(ds_bc7_tests test_bc7.cpp)
+target_link_libraries(ds_bc7_tests PRIVATE engine_headers bc7enc Catch2::Catch2WithMain)
+add_test(NAME ds_bc7_tests COMMAND ds_bc7_tests)
+
 # Headless smoke target (PLAN task 46): NOT a Catch2 test. Links the FULL
 # `engine` lib and constructs every device-independent subsystem (physics,
 # audio, Lua scripts, particles, ECS) without creating a GPU device/window, so
