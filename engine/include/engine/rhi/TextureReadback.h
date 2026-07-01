@@ -4,6 +4,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <vector>
 
 // =============================================================================
@@ -77,7 +78,7 @@ inline float halfToFloat(uint16_t h) {
     }
     float out;
     static_assert(sizeof(out) == sizeof(bits));
-    __builtin_memcpy(&out, &bits, sizeof(out));
+    std::memcpy(&out, &bits, sizeof(out));
     return out;
 }
 
@@ -139,15 +140,15 @@ inline std::vector<uint8_t> convertToRgb8(const uint8_t* src, std::size_t pixelC
             break;
         case TextureFormat::R32Float: {
             float v;
-            __builtin_memcpy(&v, p, sizeof(v));
+            std::memcpy(&v, p, sizeof(v));
             r = g = b = detail::clampToU8(v);
             break;
         }
         case TextureFormat::RGBA16Float: {
             uint16_t hr, hg, hb;
-            __builtin_memcpy(&hr, p + 0, 2);
-            __builtin_memcpy(&hg, p + 2, 2);
-            __builtin_memcpy(&hb, p + 4, 2);
+            std::memcpy(&hr, p + 0, 2);
+            std::memcpy(&hg, p + 2, 2);
+            std::memcpy(&hb, p + 4, 2);
             r = detail::clampToU8(detail::halfToFloat(hr));
             g = detail::clampToU8(detail::halfToFloat(hg));
             b = detail::clampToU8(detail::halfToFloat(hb));
