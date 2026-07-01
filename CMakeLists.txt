@@ -30,6 +30,17 @@ target_include_directories(cgltf INTERFACE extern/cgltf)
 add_library(miniaudio INTERFACE)
 target_include_directories(miniaudio INTERFACE extern/miniaudio)
 
+# BC7 texture encoder + decoder (bc7enc_rdo). Only the two standalone TUs are
+# compiled — the RDO/ispc machinery is not pulled in. Used by the asset_cook
+# tool (encode) and the ds_bc7_tests round-trip (encode+decode). The decoder
+# guards its SSE2 intrinsics behind __SSE2__/_M_X64 with scalar fallbacks, so it
+# compiles on arm64 macOS too.
+add_library(bc7enc STATIC
+    extern/bc7enc_rdo/bc7enc.cpp
+    extern/bc7enc_rdo/bc7decomp.cpp
+)
+target_include_directories(bc7enc PUBLIC extern/bc7enc_rdo)
+
 # ---------------------------------------------------------------------------
 # EnTT (ECS)
 # ---------------------------------------------------------------------------
