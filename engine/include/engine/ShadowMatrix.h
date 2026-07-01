@@ -76,4 +76,62 @@ inline glm::vec4 worldToShadowUV(const glm::mat4& lightSpace, const glm::vec3& w
     return lightSpace * glm::vec4(worldPos, 1.f);
 }
 
+// ---------------------------------------------------------------------------
+// Point-light shadows (distance-based, 6 perspective faces — see
+// shaders/point_shadow_depth.slang). Unlike the single-cascade sun map, a
+// point light needs one frustum per cube face; these are the pure CPU-side
+// matrix builders, kept engine-independent so they're unit-testable here
+// (the GPU-side face rendering/sampling cannot be verified without hardware).
+//
+// Face index order: 0=+X, 1=-X, 2=+Y, 3=-Y, 4=+Z, 5=-Z (the conventional
+// OpenGL cube-map face order).
+// ---------------------------------------------------------------------------
+
+// World-space direction the given cube face looks toward.
+inline glm::vec3 cubeFaceDirection(int face) {
+    switch (face) {
+    case 0:
+        return glm::vec3{1.f, 0.f, 0.f};
+    case 1:
+        return glm::vec3{-1.f, 0.f, 0.f};
+    case 2:
+        return glm::vec3{0.f, 1.f, 0.f};
+    case 3:
+        return glm::vec3{0.f, -1.f, 0.f};
+    case 4:
+        return glm::vec3{0.f, 0.f, 1.f};
+    case 5:
+    default:
+        return glm::vec3{0.f, 0.f, -1.f};
+    }
+}
+
+// Up reference for the given cube face. The +-Y faces use (0,0,1)/(0,0,-1)
+// since their view direction is parallel to the default (0,1,0) up (the same
+// degeneracy sunLightSpaceMatrix guards against for a straight-down sun).
+inline glm::vec3 cubeFaceUp(int face) {
+    switch (face) {
+    case 2:
+        return glm::vec3{0.f, 0.f, 1.f};
+    case 3:
+        return glm::vec3{0.f, 0.f, -1.f};
+    default:
+        return glm::vec3{0.f, -1.f, 0.f};
+    }
+}
+
+// Perspective (90-degree FOV, square aspect) view-projection looking from
+// `lightPos` toward cube face `face` (0..5, see cubeFaceDirection). nearZ/farZ
+// size the frustum; callers should set farZ to the light's own falloff radius
+// so the shadow frustum and the light's attenuation agree (a fragment beyond
+// the light's radius contributes zero light regardless of shadow result).
+// NOTE: the project builds with GLM_FORCE_DEPTH_ZERO_TO_ONE (see
+// sunLightSpaceMatrix's note above) — glm::perspective() respects the define
+// and emits a [0,1] depth-range projection.
+inline glm::mat4 pointShadowFaceMatrix(const glm::vec3& lightPos, int face, float nearZ, float farZ) {
+    const glm::mat4 view = glm::lookAt(lightPos, lightPos + cubeFaceDirection(face), cubeFaceUp(face));
+    const glm::mat4 proj = glm::perspective(glm::radians(90.f), 1.f, nearZ, farZ);
+    return proj * view;
+}
+
 } // namespace ds

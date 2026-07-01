@@ -1,20 +1,18 @@
 #pragma once
 
 #include "engine/AudioSystem.h"
-#include "engine/BossLogic.h"
 #include "engine/Camera.h"
 #include "engine/CombatFeedback.h"
 #include "engine/GameFeel.h"
-#include "engine/ParryTech.h"
 #include "engine/ParticleSystem.h"
 #include "engine/PhysicsWorld.h"
-#include "engine/PickupSystem.h"
 #include "engine/PlayerController.h"
 #include "engine/QualityProfile.h"
 #include "engine/RenderGraph.h"
 #include "engine/SaveData.h"
 #include "engine/ScriptSystem.h"
 #include "engine/ShaderWatcher.h"
+#include "engine/ShadowMatrix.h"
 #include "engine/StyleMeter.h"
 #include "engine/TextureManager.h"
 #include "engine/UISystem.h"
@@ -104,7 +102,7 @@ class Engine {
     void spawnWaveEnemies(int count);
     // Collects SpawnPoint entity positions, falling back to arena corners when
     // the world has none. Used to place each wave.
-    std::vector<glm::vec3> waveSpawnPositions() const;
+    std::vector<SpawnPoint> waveSpawnPositions() const;
     // Full reset for (re)starting a run: clears the world, rebuilds the level,
     // respawns the player and resets waves/score, then enters Playing.
     void startGame();
@@ -206,6 +204,41 @@ class Engine {
     // Renders all Transform+Mesh entities depth-only from the sun's POV into
     // m_shadowMap, pushing lightSpace*model as the vertex MVP.
     void renderDepthOnly(rhi::IRHICommandList* cmd, const glm::mat4& lightSpace);
+
+    // --- Point-light shadow (one shadow-casting light per frame, 6 faces). --
+    // Distance-based point-light shadow (see engine/ShadowMatrix.h's
+    // pointShadowFaceMatrix and shaders/point_shadow_depth.slang): each cube
+    // face writes linear distance-from-light into its own small R32Float
+    // color target. A single scratch D32Float depth buffer is shared and
+    // re-cleared across all 6 face passes purely for each pass's own
+    // hidden-surface test (it is never sampled afterward) — safe because the
+    // 6 passes run strictly sequentially within one frame. The face textures
+    // + sampler + scratch depth are always created (mirrors m_shadowMap's
+    // texture, which is unconditional so the mesh FS's fixed binding slots
+    // stay valid on every tier); the VS/FS/pipeline are gated by
+    // m_quality.shadows exactly like m_shadowVS/m_shadowFS/m_shadowPipeline,
+    // since renderPointShadowFace is only ever invoked when drawShadows.
+    rhi::RHIShader m_pointShadowVS         = {};
+    rhi::RHIShader m_pointShadowFS         = {};
+    rhi::RHIPipeline m_pointShadowPipeline = {};
+    rhi::RHITexture m_pointShadowFaces[6]{};
+    rhi::RHITexture m_pointShadowDepthScratch = {};
+    rhi::RHISampler m_pointShadowSampler      = {};
+    // One buffer PER FACE rather than a single shared one (mirrors why
+    // m_shadowInstanceBuffer is separate from m_instanceBuffer, see that
+    // comment above): uploadImmediate submits its copy on its own command
+    // buffer, independent of the main recorded command buffer's eventual
+    // submit, so two passes recorded back-to-back in the same frame that
+    // shared one buffer could have a later face's upload race a not-yet-
+    // executed earlier face's draw. Six small buffers (4096 mat4s each,
+    // ~1.5MB total) sidestep that entirely.
+    rhi::RHIBuffer m_pointShadowInstanceBuffer[6]{};
+    static constexpr uint32_t kPointShadowFaceSize = 512;
+    // Renders depth (as linear distance from `lightPos`) for cube face
+    // `face` into m_pointShadowFaces[face]; the caller has already bound that
+    // texture as the active pass's color attachment.
+    void renderPointShadowFace(rhi::IRHICommandList* cmd, int face, const glm::mat4& faceLightSpace,
+                                const glm::vec3& lightPos);
 
     // Offscreen HDR target (task 21). Scene + particles render into this
     // RGBA16Float texture; the tonemap pass then resolves it to the LDR
@@ -315,18 +348,25 @@ class Engine {
     AudioSystem m_audio;
     PhysicsWorld m_physics;
 
-    // Lua scripting host: data-drives wave/enemy tuning from assets/scripts and
-    // fires onWaveStart / onEnemyDeath / onPlayerDeath callbacks. Initialised in
-    // initScene(); all hooks are no-ops if the config failed to load.
+    // Lua scripting host: owns the wave/parry/pickups gameplay state machines
+    // (and, in later steps, boss + enemy AI), data-drives enemy stat overrides,
+    // and fires onWaveStart / onEnemyDeath / onPlayerDeath callbacks.
+    // Initialised in initScene(); every wrapper is a no-op-friendly graceful
+    // fallback if a script failed to load.
     ScriptSystem m_scripts;
     // Cached enemy stats from the loaded Lua config (or hardcoded defaults when
     // the script provided none). Applied to each spawned enemy.
     ScriptEnemyStats m_enemyStats;
-    // Loads assets/scripts/waves.lua (if present), wires bindings, and pulls the
-    // wave/enemy tuning back into m_waveConfig / m_enemyStats. Graceful fallback
-    // to hardcoded defaults when the file is missing or errors.
+    // Wires Callbacks (camera/player/time + the gameplay action hooks) and
+    // loads every file in kScripts, in order. A missing/broken file just
+    // leaves its module's functions undefined (every ScriptSystem wrapper
+    // degrades gracefully), so load order doesn't matter — each script owns
+    // an independent ds.<module> table.
     void initScripts();
-    static constexpr const char* kWaveScript = "scripts/waves.lua";
+    static constexpr const char* kScripts[] = {
+        "scripts/enemy_ai.lua", "scripts/wave.lua",    "scripts/boss.lua",
+        "scripts/parry.lua",    "scripts/pickups.lua", "scripts/hooks.lua",
+    };
     uint32_t m_playerBodyId                  = 0;
     std::unique_ptr<PlayerController> m_player;
 
@@ -361,8 +401,6 @@ class Engine {
     // player apply its effect (heal / refill ammo / dash charge), play a cue +
     // VFX, and destroy the entity (mesh auto-freed on_destroy).
     void pickupSystem(float dt);
-    // Running kill counter used for the deterministic pickup drop cadence.
-    int m_killCount = 0;
 
     // --- Boss (task 40). ---------------------------------------------------
     // Spawns the single boss entity (large box, high health, BossComponent) as
@@ -432,9 +470,9 @@ class Engine {
     HitMarker m_hitMarker;
 
     // --- Parry tech (task 35): short window that negates damage, reflects a
-    // projectile, and refunds a dash charge on success. ---------------------
-    ParryState m_parry;
-    ParryTuning m_parryTuning;
+    // projectile, and refunds a dash charge on success. State/timers now live
+    // in Lua (assets/scripts/parry.lua, module ds.parry) behind m_scripts'
+    // parry*() wrappers; Engine only keeps the input edge-detect + HUD flash.
     bool m_parryPressed  = false;
     float m_parryFlash   = 0.f; // HUD flash timer on a successful parry
     bool m_parryHeldPrev = false;
@@ -465,9 +503,12 @@ class Engine {
     static constexpr int kSettingsRowCount = 6; // master/sfx/music/ui/sens + toggles row
 
     // --- Game state machine + wave/score state (task 18). ------------------
+    // m_wave is a read-back cache: every mutation goes through m_scripts'
+    // wave*() wrappers (assets/scripts/wave.lua, module ds.wave), refreshed via
+    // m_scripts.readWaveState() after each one. Config now lives entirely in
+    // ds.wave.config; nothing in Engine.cpp reads a WaveConfig anymore.
     GameState m_state = GameState::Menu;
     WaveState m_wave;
-    WaveConfig m_waveConfig;
     int m_highScore = 0; // best score loaded from disk, updated on death/victory
 
     // --- Persistent progression save (task 38). ----------------------------
@@ -490,9 +531,12 @@ class Engine {
     rhi::RHITexture m_enemyAlbedo  = {};
     rhi::RHISampler m_enemySampler = {};
 
-    // Level file to load on startup, relative to ds::paths::assets(). If it is
-    // missing or fails to parse, the engine falls back to the hardcoded arena.
-    static constexpr const char* kStartupLevel = "levels/arena.dslv";
+    // Level loading is a 3-tier fallback chain, relative to ds::paths::assets():
+    // a Lua procedural level script first, then the binary .dslv, then the
+    // hardcoded buildArena(). Each tier only runs if the previous one produced
+    // nothing, so the engine always has playable geometry.
+    static constexpr const char* kLevelGenScript = "scripts/level.lua";
+    static constexpr const char* kStartupLevel   = "levels/arena.dslv";
 
     static constexpr glm::vec3 kPlayerSpawn{0.f, 1.7f, 0.f};
     // Resolved player spawn (task 42): seeded to kPlayerSpawn, then overridden by
@@ -502,6 +546,19 @@ class Engine {
     glm::vec3 m_playerSpawn               = kPlayerSpawn;
     static constexpr float kRespawnDelay  = 2.f;
     static constexpr int kPlayerMaxHealth = 100;
+
+    // World-space AABB of whichever level actually loaded (Lua-generated,
+    // .dslv, or the buildArena fallback), computed once in initScene() and
+    // reused every frame to size the sun's orthographic shadow frustum (see
+    // render()'s sunLightSpaceMatrix call). MUST track the real level extent:
+    // the multi-room Lua generator (assets/scripts/level.lua) can span tens
+    // of units in X, and a fragment outside this box gets treated as
+    // unconditionally lit by sampleSunShadow's out-of-frustum fallback — a
+    // stale/undersized box here is exactly what reads as "fullbright" (every
+    // surface beyond the box gets full unshadowed sun regardless of walls or
+    // ceiling). Defaults to buildArena's own known extents so the third-tier
+    // fallback is correct even if initScene's assignment is ever skipped.
+    ds::Bounds m_levelBounds{glm::vec3{-10.2f, -0.2f, -10.2f}, glm::vec3{10.2f, 5.2f, 10.2f}};
 
     // Audio asset paths, relative to ds::paths::assets(). Missing files are
     // logged and skipped by AudioSystem (see assets/sfx/README.md).

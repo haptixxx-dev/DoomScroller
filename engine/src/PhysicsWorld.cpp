@@ -16,6 +16,7 @@
 #include <Jolt/Physics/Collision/RayCast.h>
 #include <Jolt/Physics/Collision/Shape/BoxShape.h>
 #include <Jolt/Physics/Collision/Shape/CapsuleShape.h>
+#include <Jolt/Physics/Collision/Shape/MeshShape.h>
 #include <Jolt/Physics/PhysicsSystem.h>
 #include <Jolt/RegisterTypes.h>
 #include <mimalloc.h>
@@ -150,6 +151,32 @@ uint32_t PhysicsWorld::addStaticBox(glm::vec3 center, glm::vec3 halfExtents) {
 
     JPH::BodyCreationSettings bcs(shape, JPH::RVec3(center.x, center.y, center.z), JPH::Quat::sIdentity(),
                                   JPH::EMotionType::Static, Layers::NON_MOVING);
+
+    JPH::BodyInterface& bi = m_impl->system.GetBodyInterface();
+    JPH::BodyID id         = bi.CreateAndAddBody(bcs, JPH::EActivation::DontActivate);
+    return id.GetIndexAndSequenceNumber();
+}
+
+uint32_t PhysicsWorld::addStaticMesh(const std::vector<glm::vec3>& vertices, const std::vector<uint32_t>& indices,
+                                     glm::vec3 position, glm::quat rotation) {
+    JPH::VertexList joltVerts;
+    joltVerts.reserve(vertices.size());
+    for (const auto& v : vertices)
+        joltVerts.push_back(JPH::Float3(v.x, v.y, v.z));
+
+    JPH::IndexedTriangleList joltTris;
+    joltTris.reserve(indices.size() / 3);
+    for (size_t i = 0; i + 2 < indices.size(); i += 3)
+        joltTris.push_back(JPH::IndexedTriangle(indices[i], indices[i + 1], indices[i + 2]));
+
+    JPH::MeshShapeSettings shapeSettings(joltVerts, joltTris);
+    shapeSettings.SetEmbedded();
+
+    JPH::ShapeRefC shape = shapeSettings.Create().Get();
+
+    JPH::BodyCreationSettings bcs(shape, JPH::RVec3(position.x, position.y, position.z),
+                                  JPH::Quat(rotation.x, rotation.y, rotation.z, rotation.w), JPH::EMotionType::Static,
+                                  Layers::NON_MOVING);
 
     JPH::BodyInterface& bi = m_impl->system.GetBodyInterface();
     JPH::BodyID id         = bi.CreateAndAddBody(bcs, JPH::EActivation::DontActivate);

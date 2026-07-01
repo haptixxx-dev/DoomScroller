@@ -16,8 +16,8 @@ target_link_libraries(engine_headers INTERFACE glm::glm EnTT::EnTT)
 add_library(engine_math STATIC
     src/Camera.cpp
     src/ParticleSystem.cpp
-    src/WaveSystem.cpp
     src/ShaderWatcher.cpp
+    src/ProceduralTextures.cpp
 )
 target_include_directories(engine_math PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
@@ -33,16 +33,22 @@ add_library(engine STATIC
     src/ShaderLoader.cpp
     src/ShaderWatcher.cpp
     src/TextureManager.cpp
+    src/ProceduralTextures.cpp
     src/MeshLoader.cpp
+    src/GltfExtract.cpp
     src/PhysicsWorld.cpp
     src/LevelLoader.cpp
+    src/LevelGen.cpp
     src/PlayerController.cpp
     src/ParticleSystem.cpp
-    src/WaveSystem.cpp
     src/HighScore.cpp
     src/UISystem.cpp
     src/AudioSystem.cpp
     src/ScriptSystem.cpp
+    src/ScriptSystemGameplay.cpp
+    src/script/LuaUserdata.cpp
+    src/script/LuaVec3.cpp
+    src/script/LuaGlobal.cpp
     src/miniaudio_impl.cpp
     src/cgltf_impl.cpp
     src/stb_impl.cpp

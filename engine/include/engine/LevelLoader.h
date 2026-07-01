@@ -16,14 +16,28 @@ namespace rhi {
 class IRHIDevice;
 }
 
+// In-memory form of one MeshRecord: the fixed header plus its variable-length
+// local-space vertex/index payload (see LevelFormat.h's MeshRecordHeader).
+struct MeshRecord {
+    MeshRecordHeader header{};
+    std::vector<Vertex> vertices;
+    std::vector<uint32_t> indices;
+};
+
 // LevelData is the in-memory form of a parsed .dslv file: the header plus the
-// three record blocks. Used by both the runtime loader and the offline
-// converter tool (LevelLoader::write / LevelLoader::read).
+// record blocks. Used by both the runtime loader and the offline converter
+// tool (LevelLoader::write / LevelLoader::read), and by Lua-driven procedural
+// level generation (engine/LevelGen.h's generateLevelFromLua), which builds
+// a LevelData's boxes/spawns/lights in memory without ever serializing it —
+// note `meshes` specifically is NOT populated by the Lua path: ds.level.
+// add_mesh pieces go through a separate LevelGen::LuaMeshPlacement list
+// instead, loaded fresh via MeshLoader rather than baked into a MeshRecord.
 struct LevelData {
     LevelHeader header{};
     std::vector<BoxRecord> boxes;
     std::vector<SpawnPointRecord> spawns;
     std::vector<LightRecord> lights;
+    std::vector<MeshRecord> meshes;
 };
 
 // Reads/writes the binary level format and populates the ECS + physics world.
@@ -42,9 +56,13 @@ bool read(const std::filesystem::path& path, LevelData& out);
 // failure.
 bool write(const std::filesystem::path& path, const LevelData& data);
 
-// Load a level file and populate the world (task 42):
+// Populate the world from already-parsed level data (task 42, extended for
+// mesh records):
 //   * static boxes -> render meshes (MeshComponent + MaterialComponent) + a
 //     physics static body each,
+//   * static meshes -> render meshes built from each MeshRecord's baked
+//     vertex/index payload + a physics static-mesh body each (real collision,
+//     not a box approximation),
 //   * enemy spawn points (flags bit0 == 0) -> SpawnPoint entities,
 //   * each LightRecord -> a LightComponent entity (instantiated; the engine's
 //     updateLights gathers them into the per-frame light buffer),
@@ -52,7 +70,15 @@ bool write(const std::filesystem::path& path, const LevelData& data);
 //     made an enemy SpawnPoint; instead, when `playerStart` is non-null its
 //     position is written there so the caller can place the player. If the
 //     level has no player-start spawn, *playerStart is left untouched.
-// Returns false if the file could not be read, leaving the world untouched.
+// No file I/O — pure ECS/physics population, so this is the shared seam both
+// load() (the .dslv path) and Lua-driven procedural generation (LevelGen.h)
+// populate the world through, instead of duplicating this logic a third time.
+void populate(const LevelData& data, entt::registry& world, PhysicsWorld& physics, rhi::IRHIDevice& device,
+              rhi::RHITexture albedo, rhi::RHISampler sampler, glm::vec3* playerStart = nullptr);
+
+// Load a level file and populate the world: read(path, data) then
+// populate(data, ...). Returns false if the file could not be read, leaving
+// the world untouched.
 bool load(const std::filesystem::path& path, entt::registry& world, PhysicsWorld& physics, rhi::IRHIDevice& device,
           rhi::RHITexture albedo, rhi::RHISampler sampler, glm::vec3* playerStart = nullptr);
 

@@ -1,23 +1,35 @@
 // level_convert — offline converter that emits a binary .dslv level file.
 //
 // Usage:
-//   level_convert <output.dslv> [input.txt]
+//   level_convert <output.dslv> [input.txt] [--gltf input.gltf]
 //
 // With an input text file, the file is parsed (engine/LevelTextParser.h) into a
 // LevelData and written out as binary; on a parse error the message is printed
-// and the tool exits non-zero. With no input file it falls back to emitting the
-// hardcoded DoomScroller arena (the same room Engine::buildArena generates plus
-// the enemy spawn corners and a placeholder light) for back-compat.
+// and the tool exits non-zero. With no input file (and no --gltf) it falls back
+// to emitting the hardcoded DoomScroller arena (the same room Engine::buildArena
+// generates plus the enemy spawn corners and a placeholder light) for back-compat.
+//
+// --gltf bakes real mesh geometry (not box approximations) from a glTF/.glb
+// file into MeshRecords: one per triangle primitive, in node-graph order, each
+// placed by its owning node's world transform (engine/GltfExtract.h). Uniform
+// node scale is baked into the vertices; non-uniform scale/shear is rejected
+// with an error naming the offending node. --gltf can be combined with a text
+// input file in the same invocation: hand-placed boxes/spawns/lights from the
+// .txt plus baked mesh geometry from the glTF in one output file.
 //
 // The on-disk format (engine/LevelFormat.h) is identical either way.
 
+#include "engine/GltfExtract.h"
 #include "engine/LevelFormat.h"
 #include "engine/LevelLoader.h"
 #include "engine/LevelTextParser.h"
 
 #include <cstdio>
 #include <optional>
+#include <stdexcept>
 #include <string>
+#include <utility>
+#include <vector>
 
 using namespace ds;
 
@@ -97,33 +109,89 @@ bool readFile(const char* path, std::string& out) {
     return ok;
 }
 
+// Bakes every triangle primitive in `path` into one MeshRecord each (real
+// mesh geometry, not box approximations), appending to `data.meshes`. Each
+// primitive's owning node's world position/rotation places it; uniform scale
+// is already baked into the vertices by extractNodePrimitives. Prints an
+// error and returns false on parse failure or non-uniform node scale.
+bool appendGltfMeshes(const char* path, LevelData& data, std::string& error) {
+    std::vector<gltf::ExtractedNodePrimitive> nodePrims;
+    try {
+        nodePrims = gltf::extractNodePrimitives(path);
+    } catch (const std::exception& e) {
+        error = e.what();
+        return false;
+    }
+
+    for (const auto& np : nodePrims) {
+        MeshRecord mr{};
+        mr.header.position[0] = np.worldPosition.x;
+        mr.header.position[1] = np.worldPosition.y;
+        mr.header.position[2] = np.worldPosition.z;
+        mr.header.rotation[0] = np.worldRotation.x;
+        mr.header.rotation[1] = np.worldRotation.y;
+        mr.header.rotation[2] = np.worldRotation.z;
+        mr.header.rotation[3] = np.worldRotation.w;
+        mr.vertices            = np.primitive.vertices;
+        mr.indices             = np.primitive.indices;
+        mr.header.vertexCount  = static_cast<uint32_t>(mr.vertices.size());
+        mr.header.indexCount   = static_cast<uint32_t>(mr.indices.size());
+        data.meshes.push_back(std::move(mr));
+    }
+    return true;
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
-    if (argc != 2 && argc != 3) {
-        std::fprintf(stderr, "usage: %s <output.dslv> [input.txt]\n", argv[0]);
+    if (argc < 2) {
+        std::fprintf(stderr, "usage: %s <output.dslv> [input.txt] [--gltf input.gltf]\n", argv[0]);
         return 2;
     }
 
     const char* outputPath = argv[1];
+    const char* textPath   = nullptr;
+    const char* gltfPath   = nullptr;
+
+    for (int i = 2; i < argc; ++i) {
+        if (std::string(argv[i]) == "--gltf") {
+            if (i + 1 >= argc) {
+                std::fprintf(stderr, "level_convert: --gltf requires a path argument\n");
+                return 2;
+            }
+            gltfPath = argv[++i];
+        } else if (textPath == nullptr) {
+            textPath = argv[i];
+        } else {
+            std::fprintf(stderr, "usage: %s <output.dslv> [input.txt] [--gltf input.gltf]\n", argv[0]);
+            return 2;
+        }
+    }
 
     LevelData data;
-    if (argc == 3) {
-        const char* inputPath = argv[2];
+    if (textPath != nullptr) {
         std::string text;
-        if (!readFile(inputPath, text)) {
-            std::fprintf(stderr, "level_convert: failed to read '%s'\n", inputPath);
+        if (!readFile(textPath, text)) {
+            std::fprintf(stderr, "level_convert: failed to read '%s'\n", textPath);
             return 1;
         }
         std::string error;
         std::optional<LevelData> parsed = parseLevelText(text, &error);
         if (!parsed.has_value()) {
-            std::fprintf(stderr, "level_convert: parse error in '%s': %s\n", inputPath, error.c_str());
+            std::fprintf(stderr, "level_convert: parse error in '%s': %s\n", textPath, error.c_str());
             return 1;
         }
         data = std::move(*parsed);
-    } else {
+    } else if (gltfPath == nullptr) {
         data = buildArenaLevel();
+    }
+
+    if (gltfPath != nullptr) {
+        std::string error;
+        if (!appendGltfMeshes(gltfPath, data, error)) {
+            std::fprintf(stderr, "level_convert: failed to convert '%s': %s\n", gltfPath, error.c_str());
+            return 1;
+        }
     }
 
     if (!LevelLoader::write(outputPath, data)) {
@@ -131,7 +199,7 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    std::printf("level_convert: wrote %s (%zu boxes, %zu spawns, %zu lights)\n", outputPath, data.boxes.size(),
-                data.spawns.size(), data.lights.size());
+    std::printf("level_convert: wrote %s (%zu boxes, %zu spawns, %zu lights, %zu meshes)\n", outputPath,
+                data.boxes.size(), data.spawns.size(), data.lights.size(), data.meshes.size());
     return 0;
 }

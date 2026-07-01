@@ -8,6 +8,8 @@
 #include <cstdint>
 #include <cstdio>
 #include <glm/glm.hpp>
+#include <glm/gtc/quaternion.hpp>
+#include <utility>
 
 namespace ds {
 
@@ -93,6 +95,7 @@ bool LevelLoader::read(const std::filesystem::path& path, LevelData& out) {
         out.boxes.assign(header.boxCount, BoxRecord{});
         out.spawns.assign(header.spawnCount, SpawnPointRecord{});
         out.lights.assign(header.lightCount, LightRecord{});
+        out.meshes.clear();
 
         if (header.boxCount > 0 &&
             std::fread(out.boxes.data(), sizeof(BoxRecord), header.boxCount, f) != header.boxCount)
@@ -102,6 +105,31 @@ bool LevelLoader::read(const std::filesystem::path& path, LevelData& out) {
             break;
         if (header.lightCount > 0 &&
             std::fread(out.lights.data(), sizeof(LightRecord), header.lightCount, f) != header.lightCount)
+            break;
+
+        bool meshReadFailed = false;
+        out.meshes.reserve(header.meshCount);
+        for (uint32_t i = 0; i < header.meshCount; ++i) {
+            MeshRecord mr{};
+            if (std::fread(&mr.header, sizeof(MeshRecordHeader), 1, f) != 1) {
+                meshReadFailed = true;
+                break;
+            }
+            mr.vertices.assign(mr.header.vertexCount, Vertex{});
+            if (mr.header.vertexCount > 0 &&
+                std::fread(mr.vertices.data(), sizeof(Vertex), mr.header.vertexCount, f) != mr.header.vertexCount) {
+                meshReadFailed = true;
+                break;
+            }
+            mr.indices.assign(mr.header.indexCount, 0u);
+            if (mr.header.indexCount > 0 &&
+                std::fread(mr.indices.data(), sizeof(uint32_t), mr.header.indexCount, f) != mr.header.indexCount) {
+                meshReadFailed = true;
+                break;
+            }
+            out.meshes.push_back(std::move(mr));
+        }
+        if (meshReadFailed)
             break;
 
         ok = true;
@@ -122,6 +150,7 @@ bool LevelLoader::write(const std::filesystem::path& path, const LevelData& data
     header.boxCount    = static_cast<uint32_t>(data.boxes.size());
     header.spawnCount  = static_cast<uint32_t>(data.spawns.size());
     header.lightCount  = static_cast<uint32_t>(data.lights.size());
+    header.meshCount   = static_cast<uint32_t>(data.meshes.size());
 
     bool ok = false;
     do {
@@ -136,6 +165,30 @@ bool LevelLoader::write(const std::filesystem::path& path, const LevelData& data
         if (header.lightCount > 0 &&
             std::fwrite(data.lights.data(), sizeof(LightRecord), header.lightCount, f) != header.lightCount)
             break;
+
+        bool meshWriteFailed = false;
+        for (const auto& mr : data.meshes) {
+            MeshRecordHeader mh = mr.header;
+            mh.vertexCount      = static_cast<uint32_t>(mr.vertices.size());
+            mh.indexCount       = static_cast<uint32_t>(mr.indices.size());
+            if (std::fwrite(&mh, sizeof(MeshRecordHeader), 1, f) != 1) {
+                meshWriteFailed = true;
+                break;
+            }
+            if (mh.vertexCount > 0 &&
+                std::fwrite(mr.vertices.data(), sizeof(Vertex), mh.vertexCount, f) != mh.vertexCount) {
+                meshWriteFailed = true;
+                break;
+            }
+            if (mh.indexCount > 0 &&
+                std::fwrite(mr.indices.data(), sizeof(uint32_t), mh.indexCount, f) != mh.indexCount) {
+                meshWriteFailed = true;
+                break;
+            }
+        }
+        if (meshWriteFailed)
+            break;
+
         ok = true;
     } while (false);
 
@@ -143,13 +196,9 @@ bool LevelLoader::write(const std::filesystem::path& path, const LevelData& data
     return ok;
 }
 
-bool LevelLoader::load(const std::filesystem::path& path, entt::registry& world, PhysicsWorld& physics,
-                       rhi::IRHIDevice& device, rhi::RHITexture albedo, rhi::RHISampler sampler,
-                       glm::vec3* playerStart) {
-    LevelData data;
-    if (!read(path, data))
-        return false;
-
+void LevelLoader::populate(const LevelData& data, entt::registry& world, PhysicsWorld& physics,
+                           rhi::IRHIDevice& device, rhi::RHITexture albedo, rhi::RHISampler sampler,
+                           glm::vec3* playerStart) {
     for (const auto& box : data.boxes) {
         glm::vec3 center{box.center[0], box.center[1], box.center[2]};
         glm::vec3 half{box.halfExtents[0], box.halfExtents[1], box.halfExtents[2]};
@@ -177,8 +226,12 @@ bool LevelLoader::load(const std::filesystem::path& path, entt::registry& world,
                 *playerStart = pos;
             continue;
         }
+        // bits 1-2: archetype hint, 0 = unset (-1), else EnemyArchetype value + 1.
+        uint32_t archetypeBits = (sp.flags >> 1) & 0x3u;
+        int archetypeHint      = archetypeBits == 0u ? -1 : static_cast<int>(archetypeBits) - 1;
+
         auto e = world.create();
-        world.emplace<SpawnPoint>(e, SpawnPoint{pos});
+        world.emplace<SpawnPoint>(e, SpawnPoint{pos, archetypeHint});
     }
 
     // Light records (task 42): one LightComponent entity per record. No
@@ -194,6 +247,51 @@ bool LevelLoader::load(const std::filesystem::path& path, entt::registry& world,
         world.emplace<LightComponent>(e, lc);
     }
 
+    // Static mesh records (real, non-box collision geometry, see
+    // LevelFormat.h's MeshRecordHeader doc comment). Always uploaded as
+    // Uint32 index buffers: simpler than the runtime loader's 16/32-bit
+    // narrowing, acceptable for infrequent, large, one-off level geometry.
+    for (const auto& mr : data.meshes) {
+        glm::vec3 pos{mr.header.position[0], mr.header.position[1], mr.header.position[2]};
+        // glm::quat's constructor takes (w, x, y, z); the on-disk layout is
+        // x,y,z,w (LevelFormat.h), so the components must be reordered here.
+        glm::quat rot{mr.header.rotation[3], mr.header.rotation[0], mr.header.rotation[1], mr.header.rotation[2]};
+
+        rhi::BufferDesc vbd{};
+        vbd.size  = mr.vertices.size() * sizeof(Vertex);
+        vbd.usage = rhi::BufferUsage::Vertex;
+        auto vb   = device.createBuffer(vbd);
+        device.uploadImmediate(vb, mr.vertices.data(), vbd.size);
+
+        rhi::BufferDesc ibd{};
+        ibd.size  = mr.indices.size() * sizeof(uint32_t);
+        ibd.usage = rhi::BufferUsage::Index;
+        auto ib   = device.createBuffer(ibd);
+        device.uploadImmediate(ib, mr.indices.data(), ibd.size);
+
+        auto e = world.create();
+        Transform t{};
+        t.position = pos;
+        t.rotation = rot;
+        world.emplace<Transform>(e, t);
+        world.emplace<MeshComponent>(
+            e, MeshComponent{vb, ib, static_cast<uint32_t>(mr.indices.size()), rhi::IndexType::Uint32});
+        world.emplace<MaterialComponent>(e, MaterialComponent{albedo, sampler});
+
+        std::vector<glm::vec3> physicsVerts(mr.vertices.size());
+        for (size_t i = 0; i < mr.vertices.size(); ++i)
+            physicsVerts[i] = mr.vertices[i].pos;
+        physics.addStaticMesh(physicsVerts, mr.indices, pos, rot);
+    }
+}
+
+bool LevelLoader::load(const std::filesystem::path& path, entt::registry& world, PhysicsWorld& physics,
+                       rhi::IRHIDevice& device, rhi::RHITexture albedo, rhi::RHISampler sampler,
+                       glm::vec3* playerStart) {
+    LevelData data;
+    if (!read(path, data))
+        return false;
+    populate(data, world, physics, device, albedo, sampler, playerStart);
     return true;
 }
 

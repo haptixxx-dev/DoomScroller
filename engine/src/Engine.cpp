@@ -1,10 +1,14 @@
 #include "engine/Engine.h"
 
+#include "engine/GltfExtract.h"
 #include "engine/HighScore.h"
 #include "engine/InstanceBatch.h"
+#include "engine/LevelGen.h"
 #include "engine/LevelLoader.h"
+#include "engine/MeshLoader.h"
 #include "engine/Paths.h"
 #include "engine/PlayerController.h"
+#include "engine/ProceduralTextures.h"
 #include "engine/Profiler.h"
 #include "engine/ShaderLoader.h"
 #include "engine/ShadowMatrix.h"
@@ -21,6 +25,8 @@
 #include <cstdio>
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/quaternion.hpp>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
@@ -88,18 +94,39 @@ static MeshComponent makeBoxMesh(rhi::IRHIDevice& device, float hw, float hh, fl
     return MeshComponent{vb, ib, 36u, rhi::IndexType::Uint16};
 }
 
-// 4x4 RGBA8 checkerboard (white/grey) used as a placeholder texture
-static uint8_t makeCheckerboard(uint8_t* out, uint32_t w, uint32_t h) {
-    for (uint32_t y = 0; y < h; ++y) {
-        for (uint32_t x = 0; x < w; ++x) {
-            bool bright = ((x + y) & 1) == 0;
-            uint8_t v   = bright ? 255u : 128u;
-            uint8_t* p  = out + (y * w + x) * 4;
-            p[0] = p[1] = p[2] = v;
-            p[3]               = 255u;
-        }
+// World-space AABB of every BoxRecord + MeshRecord in `data` (the seam shared
+// by the Lua-generated and .dslv level paths — see m_levelBounds's comment in
+// Engine.h for why an accurate bounds here matters: it sizes the sun shadow
+// frustum, and geometry outside it reads as unconditionally lit). Box bounds
+// are exact (center +/- halfExtents); mesh bounds transform each baked vertex
+// by the record's own position/rotation. Falls back to a small default box if
+// `data` has no boxes or meshes at all (degenerate/empty level), so the
+// accumulator never returns an inside-out (min > max) box.
+static ds::Bounds boundsFromLevelData(const LevelData& data) {
+    glm::vec3 mn{std::numeric_limits<float>::max()};
+    glm::vec3 mx{std::numeric_limits<float>::lowest()};
+    auto fold = [&](const glm::vec3& p) {
+        mn = glm::min(mn, p);
+        mx = glm::max(mx, p);
+    };
+    for (const BoxRecord& box : data.boxes) {
+        glm::vec3 center{box.center[0], box.center[1], box.center[2]};
+        glm::vec3 half{box.halfExtents[0], box.halfExtents[1], box.halfExtents[2]};
+        fold(center - half);
+        fold(center + half);
     }
-    return 0;
+    for (const MeshRecord& mesh : data.meshes) {
+        glm::vec3 pos{mesh.header.position[0], mesh.header.position[1], mesh.header.position[2]};
+        // glm::quat's constructor takes (w, x, y, z); the on-disk layout is
+        // (x, y, z, w) — see LevelLoader.cpp's identical reconstruction.
+        glm::quat rot{mesh.header.rotation[3], mesh.header.rotation[0], mesh.header.rotation[1],
+                      mesh.header.rotation[2]};
+        for (const Vertex& v : mesh.vertices)
+            fold(pos + rot * v.pos);
+    }
+    if (mn.x > mx.x)
+        return ds::Bounds{glm::vec3{-10.2f, -0.2f, -10.2f}, glm::vec3{10.2f, 5.2f, 10.2f}};
+    return ds::Bounds{mn, mx};
 }
 
 // Shared mesh vertex layout (task 28). Binding 0 = per-vertex pos/color/uv/normal
@@ -204,8 +231,8 @@ Engine::Engine(const EngineConfig& cfg) : m_windowWidth(cfg.width), m_windowHeig
 
     initScene();
 
-    // Lua data-driven tuning (waves + enemy stats). Must run after m_waveConfig
-    // holds its hardcoded defaults so the script only overrides what it sets.
+    // Lua scripting: loads the wave/parry/pickups state machines + enemy stat
+    // overrides (assets/scripts/*.lua) and wires the ds.Global/callback surface.
     initScripts();
 
     // Persistent progression (task 38): seed m_save + m_highScore from
@@ -249,6 +276,24 @@ Engine::~Engine() {
         m_device->destroySampler(m_shadowSampler);
     if (m_shadowMap.valid())
         m_device->destroyTexture(m_shadowMap);
+    for (rhi::RHIBuffer& buf : m_pointShadowInstanceBuffer) {
+        if (buf.valid())
+            m_device->destroyBuffer(buf);
+    }
+    if (m_pointShadowPipeline.valid())
+        m_device->destroyPipeline(m_pointShadowPipeline);
+    if (m_pointShadowVS.valid())
+        m_device->destroyShader(m_pointShadowVS);
+    if (m_pointShadowFS.valid())
+        m_device->destroyShader(m_pointShadowFS);
+    if (m_pointShadowSampler.valid())
+        m_device->destroySampler(m_pointShadowSampler);
+    for (rhi::RHITexture& tex : m_pointShadowFaces) {
+        if (tex.valid())
+            m_device->destroyTexture(tex);
+    }
+    if (m_pointShadowDepthScratch.valid())
+        m_device->destroyTexture(m_pointShadowDepthScratch);
     if (m_particleAlphaPipe.valid())
         m_device->destroyPipeline(m_particleAlphaPipe);
     if (m_particleAdditivePipe.valid())
@@ -300,9 +345,12 @@ Engine::~Engine() {
 void Engine::initScene() {
     ShaderLoader loader(static_cast<SDL_GPUDevice*>(m_device->nativeDevice()), paths::shaders());
     m_meshVS = loader.load(*m_device, "mesh", rhi::ShaderStage::Vertex, 0, 1);
-    // Mesh FS now declares 2 samplers (albedo + shadow map) and 3 uniform
-    // buffers (lights @0, material @1, shadow matrix @2).
-    m_meshFS = loader.load(*m_device, "mesh", rhi::ShaderStage::Fragment, 2, 3);
+    // Mesh FS now declares 8 samplers (albedo + sun shadow map + 6 point-
+    // shadow cube faces) and 4 uniform buffers (lights @0, material @1, sun
+    // shadow matrix @2, point-shadow face matrices+light pos @3). Keep this
+    // in sync with the hot-reload load call below AND with mesh.slang's
+    // actual binding count — a mismatch fails pipeline creation outright.
+    m_meshFS = loader.load(*m_device, "mesh", rhi::ShaderStage::Fragment, 8, 4);
 
     // Seed the runtime quality sizes (task 34): shadow-map resolution and the
     // bloom render-target size (half- vs full-window res). Done before the
@@ -461,20 +509,177 @@ void Engine::initScene() {
         m_shadowPipeline            = m_device->createPipeline(shadowPipe);
     }
 
-    // Checkerboard placeholder texture
-    constexpr uint32_t kTexW = 8, kTexH = 8;
-    uint8_t pixels[kTexW * kTexH * 4];
-    makeCheckerboard(pixels, kTexW, kTexH);
-    rhi::RHITexture albedo = m_textures->createFromMemory(pixels, kTexW, kTexH, "checkerboard");
+    // Point-light shadow faces: 6 small R32Float color targets (linear
+    // distance from the light) + one shared D32Float scratch depth (never
+    // sampled, just this pass's own hidden-surface test) + a clamp sampler.
+    // Always created (mirrors m_shadowMap above) so the mesh FS's 6 fixed
+    // texture/sampler slots stay valid on every tier.
+    rhi::TextureDesc pointFaceDesc{};
+    pointFaceDesc.width          = kPointShadowFaceSize;
+    pointFaceDesc.height         = kPointShadowFaceSize;
+    pointFaceDesc.format         = rhi::TextureFormat::R32Float;
+    pointFaceDesc.isRenderTarget = true;
+    pointFaceDesc.debugName      = "pointShadowFace";
+    for (rhi::RHITexture& face : m_pointShadowFaces) {
+        if (!face.valid())
+            face = m_device->createTexture(pointFaceDesc);
+    }
+
+    rhi::TextureDesc pointDepthDesc{};
+    pointDepthDesc.width          = kPointShadowFaceSize;
+    pointDepthDesc.height         = kPointShadowFaceSize;
+    pointDepthDesc.format         = rhi::TextureFormat::D32Float;
+    pointDepthDesc.isDepthStencil = true;
+    pointDepthDesc.debugName      = "pointShadowDepthScratch";
+    if (!m_pointShadowDepthScratch.valid())
+        m_pointShadowDepthScratch = m_device->createTexture(pointDepthDesc);
+
+    if (!m_pointShadowSampler.valid()) {
+        rhi::SamplerDesc pointSampler{};
+        pointSampler.addressU = rhi::AddressMode::ClampToEdge;
+        pointSampler.addressV = rhi::AddressMode::ClampToEdge;
+        pointSampler.addressW = rhi::AddressMode::ClampToEdge;
+        m_pointShadowSampler  = m_device->createSampler(pointSampler);
+    }
+
+    // VS/FS/pipeline/instance-buffers built only on the shadows-enabled tier
+    // (mirrors m_shadowPipeline above) — renderPointShadowFace is only ever
+    // invoked when drawShadows, so an invalid pipeline on the Minimum tier is
+    // never bound.
+    if (m_quality.shadows) {
+        m_pointShadowVS = loader.load(*m_device, "point_shadow_depth", rhi::ShaderStage::Vertex, 0, 1);
+        // Both the vertex (lightSpace) and fragment (lightPos) stages of
+        // point_shadow_depth.slang reference the SAME gPush constant buffer,
+        // so each stage's compiled module independently needs 1 uniform
+        // buffer slot (see PointShadowPush's dual push in renderPointShadowFace).
+        m_pointShadowFS = loader.load(*m_device, "point_shadow_depth", rhi::ShaderStage::Fragment, 0, 1);
+
+        for (rhi::RHIBuffer& buf : m_pointShadowInstanceBuffer) {
+            if (buf.valid())
+                continue;
+            rhi::BufferDesc pInstDesc{};
+            pInstDesc.size      = static_cast<uint64_t>(sizeof(glm::mat4)) * kMaxInstances;
+            pInstDesc.usage     = rhi::BufferUsage::Vertex;
+            pInstDesc.debugName = "point_shadow_instances";
+            buf                 = m_device->createBuffer(pInstDesc);
+        }
+
+        rhi::ColorTargetDesc pointColorTarget{};
+        pointColorTarget.format = rhi::TextureFormat::R32Float;
+
+        rhi::PipelineDesc pointShadowPipe{};
+        pointShadowPipe.vertexShader     = m_pointShadowVS;
+        pointShadowPipe.fragmentShader   = m_pointShadowFS;
+        pointShadowPipe.vertexAttributes = {attrs, 8};
+        pointShadowPipe.vertexBindings   = {vbindings, 2};
+        pointShadowPipe.colorTargets     = {&pointColorTarget, 1};
+        pointShadowPipe.hasDepth         = true;
+        pointShadowPipe.depthTest        = true;
+        pointShadowPipe.depthWrite       = true;
+        pointShadowPipe.depthFormat      = rhi::TextureFormat::D32Float;
+        pointShadowPipe.depthCompare     = rhi::CompareOp::Less;
+        pointShadowPipe.cullMode         = rhi::CullMode::Front;
+        m_pointShadowPipeline            = m_device->createPipeline(pointShadowPipe);
+    }
+
+    // Procedurally generated surface textures (no image-asset pipeline exists
+    // yet — see engine/ProceduralTextures.h). Each entity category's existing
+    // vertex-color tint (room WHITE/PILLAR_COLOR, enemy archetype colors,
+    // projectile bolt colors — all already wired through MaterialComponent's
+    // albedo*vertexColor*tint multiply in mesh.slang) still differentiates
+    // instances; the texture adds real surface detail underneath that tint.
+    constexpr uint32_t kSurfaceTexSize = 128;
+    std::vector<uint8_t> texPixels(static_cast<size_t>(kSurfaceTexSize) * kSurfaceTexSize * 4);
+
+    // Level geometry (floor/walls/ceiling/pillars/Lua meshes): light concrete
+    // with subtle grain and a panel grid.
+    ProceduralTextureParams levelParams{};
+    levelParams.baseColor[0]  = 195;
+    levelParams.baseColor[1]  = 195;
+    levelParams.baseColor[2]  = 200;
+    levelParams.noiseScale    = 10.f;
+    levelParams.noiseStrength = 0.15f;
+    levelParams.gridSpacing   = 4.f;
+    levelParams.gridLineWidth = 0.03f;
+    levelParams.gridDarken    = 0.55f;
+    levelParams.seed          = 1;
+    generateProceduralTexture(texPixels.data(), kSurfaceTexSize, kSurfaceTexSize, levelParams);
+    rhi::RHITexture albedo =
+        m_textures->createFromMemory(texPixels.data(), kSurfaceTexSize, kSurfaceTexSize, "concrete");
+
+    // Enemy hulls: darker, higher-contrast plating, no grid (organic-ish armor
+    // rather than ruled panels).
+    ProceduralTextureParams enemyParams{};
+    enemyParams.baseColor[0]  = 140;
+    enemyParams.baseColor[1]  = 140;
+    enemyParams.baseColor[2]  = 150;
+    enemyParams.noiseScale    = 14.f;
+    enemyParams.noiseStrength = 0.3f;
+    enemyParams.gridSpacing   = 0.f;
+    enemyParams.seed          = 2;
+    generateProceduralTexture(texPixels.data(), kSurfaceTexSize, kSurfaceTexSize, enemyParams);
+    rhi::RHITexture enemyTex =
+        m_textures->createFromMemory(texPixels.data(), kSurfaceTexSize, kSurfaceTexSize, "enemy_armor");
+
+    // Projectiles: a neutral white glow blob (radial falloff baked into RGB,
+    // see generateGlowTexture's doc comment) tinted per-bolt by the existing
+    // per-entity vertex color, so one shared texture covers every weapon.
+    constexpr uint32_t kGlowTexSize = 32;
+    std::vector<uint8_t> glowPixels(static_cast<size_t>(kGlowTexSize) * kGlowTexSize * 4);
+    generateGlowTexture(glowPixels.data(), kGlowTexSize, kGlowTexSize, 255, 255, 255);
+    rhi::RHITexture glowTex = m_textures->createFromMemory(glowPixels.data(), kGlowTexSize, kGlowTexSize, "glow");
 
     m_camera.yaw = -90.f;
 
-    // Prefer a data-driven level file; fall back to the hardcoded arena when it
-    // is missing so the engine always has playable geometry. The level's
-    // player-start spawn (flags bit0) overrides m_playerSpawn when present
-    // (task 42); otherwise it stays kPlayerSpawn, matching the arena fallback.
-    m_playerSpawn = kPlayerSpawn;
-    if (!loadLevel(kStartupLevel, albedo, m_linearSampler, &m_playerSpawn))
+    // 3-tier level fallback chain: a Lua procedural level script first, then
+    // the binary .dslv, then the hardcoded arena, so the engine always has
+    // playable geometry. The level's player-start spawn (flags bit0 / the
+    // Lua script's ds.level.add_spawn(pos, true)) overrides m_playerSpawn when
+    // present (task 42); otherwise it stays kPlayerSpawn.
+    m_playerSpawn   = kPlayerSpawn;
+    bool levelReady = false;
+
+    LevelData genData;
+    std::vector<LuaMeshPlacement> genMeshes;
+    std::filesystem::path genScriptPath = paths::assets() / kLevelGenScript;
+    if (generateLevelFromLua(genScriptPath, genData, genMeshes)) {
+        LevelLoader::populate(genData, m_world, m_physics, *m_device, albedo, m_linearSampler, &m_playerSpawn);
+        m_levelBounds = boundsFromLevelData(genData);
+
+        // Lua-placed mesh pieces (ds.level.add_mesh) load fresh every run via
+        // the live device, never serialized. Collision needs its own CPU-side
+        // read since MeshLoader::load discards vertex/index data after GPU
+        // upload — a one-time startup cost, not a hot path.
+        for (const auto& mp : genMeshes) {
+            std::vector<MeshComponent> parts             = MeshLoader::load(*m_device, mp.path);
+            std::vector<gltf::ExtractedPrimitive> cpuGeo = gltf::extractTrianglePrimitives(mp.path);
+            for (size_t i = 0; i < parts.size() && i < cpuGeo.size(); ++i) {
+                auto e = m_world.create();
+                Transform t{};
+                t.position = mp.position;
+                t.rotation = mp.rotation;
+                m_world.emplace<Transform>(e, t);
+                m_world.emplace<MeshComponent>(e, parts[i]);
+                m_world.emplace<MaterialComponent>(e, MaterialComponent{albedo, m_linearSampler});
+
+                std::vector<glm::vec3> physicsVerts(cpuGeo[i].vertices.size());
+                for (size_t v = 0; v < physicsVerts.size(); ++v) {
+                    physicsVerts[v] = cpuGeo[i].vertices[v].pos;
+                    // Fold this Lua-placed mesh's world-space extent into the
+                    // sun shadow bounds too — boundsFromLevelData only sees
+                    // genData's boxes (ds.level.add_mesh pieces are a separate
+                    // runtime-only path, never baked into a MeshRecord).
+                    glm::vec3 worldPos = mp.position + mp.rotation * physicsVerts[v];
+                    m_levelBounds.min  = glm::min(m_levelBounds.min, worldPos);
+                    m_levelBounds.max  = glm::max(m_levelBounds.max, worldPos);
+                }
+                m_physics.addStaticMesh(physicsVerts, cpuGeo[i].indices, mp.position, mp.rotation);
+            }
+        }
+        levelReady = true;
+    }
+
+    if (!levelReady && !loadLevel(kStartupLevel, albedo, m_linearSampler, &m_playerSpawn))
         buildArena(albedo, m_linearSampler);
 
     // Camera starts at the resolved player spawn at eye height.
@@ -489,13 +694,13 @@ void Engine::initScene() {
     m_world.emplace<HealthComponent>(m_playerEntity, HealthComponent{kPlayerMaxHealth, kPlayerMaxHealth});
 
     // Enemy material is reused when respawning the wave.
-    m_enemyAlbedo  = albedo;
+    m_enemyAlbedo  = enemyTex;
     m_enemySampler = m_linearSampler;
     m_sceneAlbedo  = albedo;
     m_sceneSampler = m_linearSampler;
 
-    // Projectile meshes reuse the placeholder albedo/sampler.
-    m_projectileAlbedo  = albedo;
+    // Projectile meshes share the glow texture/sampler.
+    m_projectileAlbedo  = glowTex;
     m_projectileSampler = m_linearSampler;
 
     // Weapon loadout (slot order = number keys 1..N). Slot 0 is the original
@@ -624,7 +829,9 @@ void Engine::reloadShader(const std::string& name) {
     bool swapped             = false;
     try {
         newVS = loader.load(*m_device, "mesh", rhi::ShaderStage::Vertex, 0, 1);
-        newFS = loader.load(*m_device, "mesh", rhi::ShaderStage::Fragment, 2, 3);
+        // Keep these counts in sync with initScene()'s load call (8 samplers,
+        // 4 uniform buffers — see the comment there).
+        newFS = loader.load(*m_device, "mesh", rhi::ShaderStage::Fragment, 8, 4);
 
         // Mesh vertex layout (must match initScene): per-vertex stream at binding
         // 0 + per-instance model matrix at binding 1 (task 28). Shared helper so
@@ -856,23 +1063,62 @@ void Engine::initScripts() {
                     name.data(), value);
     };
 
+    // ds.Global.camera: live read/write onto m_camera. A script write lands
+    // directly on m_camera (same as every other writer), so it still composes
+    // with the shake/recoil copy render() builds each frame.
+    cb.camera.getPosition = [this] { return m_camera.position; };
+    cb.camera.setPosition = [this](const glm::vec3& p) { m_camera.position = p; };
+    cb.camera.getYaw      = [this] { return m_camera.yaw; };
+    cb.camera.setYaw      = [this](float y) { m_camera.yaw = y; };
+    cb.camera.getPitch    = [this] { return m_camera.pitch; };
+    cb.camera.setPitch    = [this](float p) { m_camera.pitch = p; };
+    cb.camera.getFovY     = [this] { return m_camera.fovY; };
+    cb.camera.setFovY     = [this](float f) { m_camera.fovY = f; };
+
+    // ds.Global.player: health is read/write; the rest mirror PlayerController's
+    // read-only accessors. m_playerEntity doesn't exist until later in
+    // initScene() either, so these go through try_get rather than get().
+    cb.player.getHealth = [this] {
+        auto* hp = m_world.try_get<HealthComponent>(m_playerEntity);
+        return hp ? hp->current : 0;
+    };
+    cb.player.setHealth = [this](int v) {
+        if (auto* hp = m_world.try_get<HealthComponent>(m_playerEntity))
+            hp->current = v;
+    };
+    cb.player.getMaxHealth = [this] {
+        auto* hp = m_world.try_get<HealthComponent>(m_playerEntity);
+        return hp ? hp->max : 0;
+    };
+    // m_player isn't constructed until later in initScene() (initScripts() runs
+    // first); guard so a script that touches ds.Global.player at load time
+    // (rather than per-frame, once the player exists) degrades to a default
+    // instead of dereferencing a null PlayerController.
+    cb.player.getDashCharges = [this] { return m_player ? m_player->dashCharges() : 0; };
+    cb.player.isSliding      = [this] { return m_player && m_player->sliding(); };
+    cb.player.getIFrames     = [this] { return m_player ? m_player->iFrames() : 0.f; };
+    cb.player.getEyePosition = [this] { return m_player ? m_player->eyePosition() : glm::vec3{0.f}; };
+
+    // ds.Global.time: current frame dt + monotonic elapsed seconds.
+    cb.time.getDt      = [this] { return m_dt; };
+    cb.time.getElapsed = [this] { return m_timeAccum; };
+
     if (!m_scripts.init(cb))
         return;
 
-    // Load the wave/enemy config; missing or broken -> keep hardcoded defaults.
-    std::filesystem::path scriptPath = paths::assets() / kWaveScript;
-    if (m_scripts.loadFile(scriptPath.string())) {
-        ScriptWaveConfig wc = m_scripts.waveConfig();
-        if (wc.overrode) {
-            m_waveConfig.baseEnemies       = wc.baseEnemies;
-            m_waveConfig.enemiesPerWave    = wc.enemiesPerWave;
-            m_waveConfig.maxEnemiesPerWave = wc.maxEnemiesPerWave;
-            m_waveConfig.maxWaves          = wc.maxWaves;
-            m_waveConfig.intermissionTime  = wc.intermissionTime;
-            m_waveConfig.killScore         = wc.killScore;
-        }
-        m_enemyStats = m_scripts.enemyStats();
+    // Load every gameplay script (enemy stats, wave/parry/pickups state
+    // machines, event hooks). Each owns an independent ds.<module> table, so a
+    // missing/broken file just leaves that module undefined — every
+    // ScriptSystem wrapper degrades gracefully rather than crashing.
+    for (const char* script : kScripts) {
+        std::filesystem::path scriptPath = paths::assets() / script;
+        m_scripts.loadFile(scriptPath.string());
     }
+
+    // Cached enemy stat overrides (assets/scripts/enemy_ai.lua's ds.enemy_stats
+    // table), applied to each spawned Grunt. Falls back to hardcoded defaults
+    // (ScriptEnemyStats{}) if the script didn't set anything.
+    m_enemyStats = m_scripts.enemyStats();
 }
 
 void Engine::spawnEnemies() {
@@ -882,34 +1128,40 @@ void Engine::spawnEnemies() {
     spawnEnemy({0.f, 1.5f, 7.f}, m_enemyAlbedo, m_enemySampler);
 }
 
-std::vector<glm::vec3> Engine::waveSpawnPositions() const {
-    std::vector<glm::vec3> out;
+std::vector<SpawnPoint> Engine::waveSpawnPositions() const {
+    std::vector<SpawnPoint> out;
     auto view = m_world.view<const SpawnPoint>();
     for (auto [entity, sp] : view.each())
-        out.push_back(sp.position);
+        out.push_back(sp);
 
     // No SpawnPoint entities: fall back to the four arena corners (matches the
     // hardcoded buildArena footprint, kept a little inside the walls).
     if (out.empty()) {
         out = {
-            {-7.f, 1.5f, -7.f},
-            {7.f, 1.5f, -7.f},
-            {-7.f, 1.5f, 7.f},
-            {7.f, 1.5f, 7.f},
+            SpawnPoint{{-7.f, 1.5f, -7.f}, -1},
+            SpawnPoint{{7.f, 1.5f, -7.f}, -1},
+            SpawnPoint{{-7.f, 1.5f, 7.f}, -1},
+            SpawnPoint{{7.f, 1.5f, 7.f}, -1},
         };
     }
     return out;
 }
 
 void Engine::spawnWaveEnemies(int count) {
-    std::vector<glm::vec3> spots = waveSpawnPositions();
+    std::vector<SpawnPoint> spots = waveSpawnPositions();
     if (spots.empty())
         return;
     // Round-robin across the available spawn points so larger waves still fan
-    // out across the arena instead of stacking on one corner. Archetype varies
-    // by wave + index so later waves field Chargers and Ranged enemies too.
-    for (int i = 0; i < count; ++i)
-        spawnEnemy(spots[i % spots.size()], m_enemyAlbedo, m_enemySampler, archetypeForWave(m_wave.wave, i));
+    // out across the arena instead of stacking on one corner. A spawn point
+    // with an archetype hint (e.g. a Lua level's per-room enemy mix) always
+    // spawns that archetype; otherwise archetype varies by wave + index so
+    // later waves field Chargers and Ranged enemies too.
+    for (int i = 0; i < count; ++i) {
+        const SpawnPoint& spot   = spots[i % spots.size()];
+        EnemyArchetype archetype = spot.archetypeHint >= 0 ? static_cast<EnemyArchetype>(spot.archetypeHint)
+                                                           : archetypeForWave(m_wave.wave, i);
+        spawnEnemy(spot.position, m_enemyAlbedo, m_enemySampler, archetype);
+    }
 }
 
 void Engine::respawnPlayer() {
@@ -942,10 +1194,11 @@ void Engine::startGame() {
 
     respawnPlayer();
 
-    resetWave(m_wave);
+    m_scripts.waveReset();
+    m_wave        = m_scripts.readWaveState();
     m_weaponIndex = 0;
     m_damageFlash = 0.f;
-    m_killCount   = 0;
+    m_scripts.pickupsReset();
 
     // Lifetime run counter (task 38): one run begins here. Persisted on the next
     // run-end via persistSave(); not flushed immediately to avoid a disk write
@@ -964,20 +1217,21 @@ void Engine::startGame() {
     m_screenShake            = ScreenShake{};
     m_recoil                 = Recoil{};
     m_hitstop                = Hitstop{};
-    m_parry                  = ParryState{};
-    m_parryFlash             = 0.f;
-    m_parryPressed           = false;
-    m_altFirePressed         = false;
+    m_scripts.parryReset();
+    m_parryFlash     = 0.f;
+    m_parryPressed   = false;
+    m_altFirePressed = false;
     m_damageEvents.clear();
     m_hitMarker = HitMarker{};
 
     // Kick off the first wave immediately (no intermission before wave 1).
-    advanceWave(m_wave, m_waveConfig);
+    m_scripts.waveAdvance();
+    m_wave = m_scripts.readWaveState();
     if (m_wave.spawnPending) {
-        int n = enemiesForWave(m_wave.wave, m_waveConfig);
+        int n = m_scripts.waveEnemiesForWave(m_wave.wave);
         spawnWaveEnemies(n);
-        m_wave.aliveEnemies = n;
-        m_wave.spawnPending = false;
+        m_scripts.waveMarkSpawned(n);
+        m_wave = m_scripts.readWaveState();
         m_scripts.onWaveStart(m_wave.wave);
     }
 
@@ -1171,7 +1425,7 @@ void Engine::spawnEnemyProjectile(const glm::vec3& origin, const glm::vec3& velo
 
 void Engine::processEnemyProjectiles() {
     const glm::vec3 playerPos   = m_camera.position;
-    const bool parryActive      = parrySucceeds(m_parry);
+    const bool parryActive      = m_scripts.parryActive();
     constexpr float kParryReach = 3.0f; // reflect bolts within this radius
     constexpr float kHitReach   = 0.6f; // bolt counts as a player hit within this radius
 
@@ -1190,10 +1444,10 @@ void Engine::processEnemyProjectiles() {
         if (parryActive && dist <= kParryReach) {
             // Reflect: flip + speed-boost the velocity and re-own to the player
             // so the owner-ignore ray lets it strike enemies. Leave it alive.
-            proj.velocity    = reflectProjectileVelocity(proj.velocity);
+            proj.velocity    = m_scripts.parryReflect(proj.velocity);
             proj.ownerBodyId = m_playerBodyId;
             // Successful parry payoff: dash refund, style, a flash + hitstop.
-            m_player->refundDash(static_cast<int>(m_parryTuning.dashRefund));
+            m_player->refundDash(static_cast<int>(m_scripts.parryDashRefund()));
             addStyleEvent(m_style, StyleEvent::Parry, m_styleConfig);
             m_parryFlash = 0.3f;
             triggerHitstop(m_hitstop, 0.05f);
@@ -1262,27 +1516,12 @@ void Engine::handleEnemyDeaths() {
         enemy.physicsBodyId = UINT32_MAX;
 
         // Pickup drop (task 33): deterministic cadence — every 3rd kill drops an
-        // orb, cycling kind so the player sees all three over a run. No RNG state.
-        ++m_killCount;
-        if (m_killCount % 3 == 0) {
-            PickupComponent::Kind kind;
-            int value;
-            switch ((m_killCount / 3) % 3) {
-            case 0:
-                kind  = PickupComponent::Kind::Health;
-                value = 25;
-                break;
-            case 1:
-                kind  = PickupComponent::Kind::Ammo;
-                value = 30;
-                break;
-            default:
-                kind  = PickupComponent::Kind::DashCharge;
-                value = 1;
-                break;
-            }
+        // orb, cycling kind so the player sees all three over a run. Cadence/
+        // kind-cycling decision now lives in Lua (assets/scripts/pickups.lua).
+        PickupDrop drop = m_scripts.pickupRegisterKill();
+        if (drop.drop) {
             // Drop a little above the floor at the death site so it is reachable.
-            spawnPickup({center.x, 0.4f, center.z}, kind, value);
+            spawnPickup({center.x, 0.4f, center.z}, static_cast<PickupComponent::Kind>(drop.kind), drop.value);
         }
     }
 }
@@ -1334,13 +1573,14 @@ void Engine::pickupSystem(float dt) {
         // Spin the orb about Y for a little life, and bob it on a sine.
         transform.rotation = glm::angleAxis(m_timeAccum * 2.5f, glm::vec3{0.f, 1.f, 0.f});
 
-        if (!withinPickupRange(playerPos, transform.position, kPickupRadius))
+        PickupCollect cc = m_scripts.pickupCollectCheck(playerPos, transform.position, kPickupRadius, pickup.value,
+                                                        playerHealth.max - playerHealth.current);
+        if (!cc.collected)
             continue;
 
         switch (pickup.kind) {
         case PickupComponent::Kind::Health: {
-            int grant = pickupEffectMagnitude(pickup.value, playerHealth.max - playerHealth.current);
-            playerHealth.current += grant;
+            playerHealth.current += cc.grant;
             break;
         }
         case PickupComponent::Kind::Ammo: {
@@ -1393,9 +1633,12 @@ void Engine::spawnBoss() {
     BossComponent boss{};
     boss.maxHealth     = 2000;
     boss.physicsBodyId = bodyId;
-    boss.attackTimer   = 2.f; // brief grace before the first volley
     m_world.emplace<BossComponent>(e, boss);
     m_world.emplace<HealthComponent>(e, HealthComponent{boss.maxHealth, boss.maxHealth});
+
+    // Phase/attack-pattern state now lives in Lua (assets/scripts/boss.lua,
+    // module ds.boss, single global instance) — reset it for this new boss.
+    m_scripts.bossReset();
 
     // A persistent ominous light at the boss.
     spawnTransientLight(spawn, {1.f, 0.2f, 0.1f}, 8.f, 4.f, 1.5f);
@@ -1422,65 +1665,27 @@ void Engine::bossSystem(float dt) {
             return;
         }
 
-        // Phase transition: when the computed phase exceeds the stored one, open
-        // a brief parryable vulnerable window and bump the attack cadence.
-        std::span<const float> thresholds{boss.phaseHealthThresholds, 3};
-        int newPhase = bossPhaseForHealth(health.current, boss.maxHealth, thresholds);
-        if (newPhase > boss.phase) {
-            boss.phase           = newPhase;
-            boss.vulnerableTimer = 2.0f; // window the player can punish / parry
-            boss.attackTimer     = 1.0f;
+        // Phase/attack-pattern logic now lives in Lua (assets/scripts/boss.lua,
+        // module ds.boss); it fires pellets itself via ds.spawn_projectile
+        // (wired to spawnEnemyProjectile below). Compare the returned phase/
+        // pattern to the cached previous values to detect a phase transition
+        // (VFX/audio cue) and a fire event (weapon-fire cue) respectively.
+        int oldPhase          = boss.phase;
+        int oldPattern        = boss.pattern;
+        BossTickResult result = m_scripts.bossTick(health.current, boss.maxHealth, dt, transform.position,
+                                                   m_camera.position, boss.physicsBodyId);
+        boss.phase            = result.phase;
+        boss.vulnerableTimer  = result.vulnerableTimer;
+        boss.pattern          = static_cast<uint8_t>(result.pattern);
+
+        if (boss.phase > oldPhase) {
+            // Window the player can punish / parry.
             m_audio.playAt(kSfxEnemyHit, transform.position);
             spawnTransientLight(transform.position, {1.f, 0.9f, 0.3f}, 8.f, 6.f, 0.4f);
             addTrauma(m_screenShake, 0.4f);
         }
-
-        if (boss.vulnerableTimer > 0.f) {
-            // During the vulnerable window the boss telegraphs (holds fire) and
-            // glows; the player can deal extra damage / parry incoming nothing.
-            boss.vulnerableTimer -= dt;
-            continue;
-        }
-
-        // Attack loop: count down, then fire a telegraphed pattern at the player.
-        boss.attackTimer -= dt;
-        if (boss.attackTimer > 0.f)
-            continue;
-
-        glm::vec3 toPlayer = m_camera.position - transform.position;
-        float dist         = glm::length(toPlayer);
-        glm::vec3 dir      = dist > 1e-4f ? toPlayer / dist : glm::vec3{0.f, 0.f, 1.f};
-        glm::vec3 muzzle   = transform.position + dir * 1.6f + glm::vec3{0.f, 0.5f, 0.f};
-
-        // Pattern escalates with the phase: a wider, faster volley each phase.
-        // Even patterns = a fan volley, odd = a faster straight burst (charge).
-        const int phase   = boss.phase;
-        const int pellets = 3 + phase * 2; // 3,5,7,...
-        const float speed = 14.f + static_cast<float>(phase) * 3.f;
-        const int damage  = 12 + phase * 4;
-
-        if ((boss.pattern & 1u) == 0u) {
-            // Fan volley: spread pellets in a horizontal arc toward the player.
-            glm::vec3 right     = glm::normalize(glm::cross(dir, glm::vec3{0.f, 1.f, 0.f}));
-            const float halfArc = 0.35f + static_cast<float>(phase) * 0.1f;
-            for (int i = 0; i < pellets; ++i) {
-                float t     = pellets > 1 ? (static_cast<float>(i) / static_cast<float>(pellets - 1)) * 2.f - 1.f : 0.f;
-                glm::vec3 d = glm::normalize(dir + right * (t * halfArc));
-                spawnEnemyProjectile(muzzle, d * speed, damage, boss.physicsBodyId);
-            }
-        } else {
-            // Charge burst: a tight, fast straight stream the player must dodge.
-            for (int i = 0; i < pellets; ++i)
-                spawnEnemyProjectile(muzzle + dir * (static_cast<float>(i) * 0.4f), dir * (speed * 1.4f), damage,
-                                     boss.physicsBodyId);
-        }
-
-        m_audio.playAt(kSfxWeaponFire, transform.position);
-        ++boss.pattern;
-        // Faster cadence in later phases.
-        boss.attackTimer = 2.2f - static_cast<float>(phase) * 0.4f;
-        if (boss.attackTimer < 0.6f)
-            boss.attackTimer = 0.6f;
+        if (boss.pattern != oldPattern)
+            m_audio.playAt(kSfxWeaponFire, transform.position);
     }
 }
 
@@ -1581,16 +1786,9 @@ entt::entity Engine::spawnEnemy(glm::vec3 position, rhi::RHITexture albedo, rhi:
 }
 
 EnemyArchetype Engine::archetypeForWave(int wave, int spawnIndex) const {
-    // Wave 1: all Grunts. From wave 2 mix in Chargers; from wave 3 add Ranged.
-    // Deterministic from (wave, spawnIndex) so spawns are reproducible.
-    if (wave <= 1)
-        return EnemyArchetype::Grunt;
-    int sel = (wave + spawnIndex) % 3;
-    if (wave >= 3 && sel == 2)
-        return EnemyArchetype::Ranged;
-    if (sel == 1)
-        return EnemyArchetype::Charger;
-    return EnemyArchetype::Grunt;
+    // Deterministic archetype pick for a wave-spawned enemy, now Lua-side
+    // (assets/scripts/enemy_ai.lua, ds.enemy_ai.archetype_for_wave).
+    return static_cast<EnemyArchetype>(m_scripts.archetypeForWave(wave, spawnIndex));
 }
 
 void Engine::buildArena(rhi::RHITexture albedo, rhi::RHISampler sampler) {
@@ -1605,6 +1803,10 @@ void Engine::buildArena(rhi::RHITexture albedo, rhi::RHISampler sampler) {
     // Each face: 4 verts, normals face room interior (inward).
     // Indices always 0,1,2,0,2,3. CullMode::None so winding doesn't matter.
     const float W = 10.f, H = 5.f, D = 10.f, T = 0.1f; // half-extents X,Y,Z; T = slab thickness
+    // Sized to this fallback room exactly (rather than relying on
+    // m_levelBounds's matching default) so the sun shadow frustum stays
+    // correct even if these constants ever change.
+    m_levelBounds      = ds::Bounds{glm::vec3{-W - T, -T, -D - T}, glm::vec3{W + T, H + T, D + T}};
     const Face faces[] = {
         // Floor (y=0), normal +Y
         {{{{-W, 0, -D}, {1, 1, 1}, {0, D}, {0, 1, 0}},
@@ -1676,7 +1878,16 @@ void Engine::buildArena(rhi::RHITexture albedo, rhi::RHISampler sampler) {
 
 bool Engine::loadLevel(const char* relPath, rhi::RHITexture albedo, rhi::RHISampler sampler, glm::vec3* playerStart) {
     std::filesystem::path full = paths::assets() / relPath;
-    return LevelLoader::load(full, m_world, m_physics, *m_device, albedo, sampler, playerStart);
+    // Read + populate explicitly (rather than the LevelLoader::load
+    // convenience wrapper) so the parsed LevelData is available here to size
+    // m_levelBounds — see boundsFromLevelData's comment on why an accurate
+    // bounds matters for the sun shadow frustum.
+    LevelData data;
+    if (!LevelLoader::read(full, data))
+        return false;
+    LevelLoader::populate(data, m_world, m_physics, *m_device, albedo, sampler, playerStart);
+    m_levelBounds = boundsFromLevelData(data);
+    return true;
 }
 
 void Engine::run() {
@@ -1877,10 +2088,10 @@ void Engine::updatePlaying() {
     bool crouchHeld  = keys[SDL_SCANCODE_LCTRL] || keys[SDL_SCANCODE_RCTRL];
 
     // --- Parry (task 35): tick timers, then open a window on the parry input
-    // (self-gated on cooldown inside triggerParry).
-    tickParry(m_parry, m_dt);
+    // (self-gated on cooldown inside ds.parry.trigger).
+    m_scripts.parryTick(m_dt);
     if (m_parryPressed) {
-        triggerParry(m_parry, m_parryTuning);
+        m_scripts.parryTrigger();
         m_audio.play(kSfxParry); // parry chime (task 44)
     }
     m_parryPressed = false;
@@ -1952,7 +2163,7 @@ void Engine::updatePlaying() {
     // step (applyDamage drops any hit while iFrames > 0). A successful parry that
     // actually had something to react to refunds a dash charge + scores style;
     // here we always treat an active window as "succeeded" for negation.
-    const bool parryActive = parrySucceeds(m_parry);
+    const bool parryActive = m_scripts.parryActive();
     if (parryActive)
         m_playerIFrames = std::max(m_playerIFrames, m_dt + 1e-3f);
 
@@ -1964,7 +2175,7 @@ void Engine::updatePlaying() {
     // diffing the live count is how we detect kills for score/combo + waves.
     int enemiesBeforeStep = static_cast<int>(m_world.view<EnemyComponent>().size());
     enemySystem(
-        m_world, m_physics, m_camera.position, m_dt, &playerHealth, &m_playerIFrames,
+        m_world, m_physics, m_scripts, m_camera.position, m_dt, &playerHealth, &m_playerIFrames,
         [this](const EnemyProjectileSpawn& s) { spawnEnemyProjectile(s.origin, s.velocity, s.damage, s.ownerBodyId); });
     int enemiesAfterStep = static_cast<int>(m_world.view<EnemyComponent>().size());
     if (playerHealth.current < healthBeforeStep) {
@@ -1980,9 +2191,11 @@ void Engine::updatePlaying() {
     // best-known impact site.
     int killsThisFrame = enemiesBeforeStep - enemiesAfterStep;
     for (int i = enemiesAfterStep; i < enemiesBeforeStep; ++i) {
-        registerKill(m_wave, m_waveConfig);
+        m_scripts.waveRegisterKill();
         m_scripts.onEnemyDeath(0, m_camera.position.x, m_camera.position.y, m_camera.position.z);
     }
+    if (killsThisFrame > 0)
+        m_wave = m_scripts.readWaveState();
     // Style meter (task 32): score the flashiest applicable category per kill.
     // Multi-kill (>=2 this frame) trumps the single-kill variants.
     if (killsThisFrame > 0) {
@@ -2125,11 +2338,13 @@ void Engine::updatePlaying() {
 
 void Engine::updateWaves() {
     // Advance combo / intermission / survival timers.
-    tickWave(m_wave, m_dt);
+    m_scripts.waveTick(m_dt);
 
     // Keep aliveEnemies in sync with the world (kills are also decremented in
     // registerKill, but this guards against any external destruction).
-    m_wave.aliveEnemies = static_cast<int>(m_world.view<EnemyComponent>().size());
+    int aliveNow = static_cast<int>(m_world.view<EnemyComponent>().size());
+    m_scripts.waveSetAliveEnemies(aliveNow);
+    m_wave = m_scripts.readWaveState();
 
     if (m_wave.aliveEnemies > 0 || m_wave.cleared)
         return;
@@ -2141,10 +2356,10 @@ void Engine::updateWaves() {
 
     if (!m_wave.intermissionArmed) {
         // First clear frame: arm the intermission delay, then wait for it to
-        // elapse via tickWave on subsequent frames. Grant a weapon upgrade once
-        // per cleared wave (task 37).
-        m_wave.intermission      = m_waveConfig.intermissionTime;
-        m_wave.intermissionArmed = true;
+        // elapse via ds.wave.tick on subsequent frames. Grant a weapon upgrade
+        // once per cleared wave (task 37).
+        m_scripts.waveArmIntermission();
+        m_wave = m_scripts.readWaveState();
         if (m_wave.wave != m_lastUpgradeWave) {
             grantWeaponUpgrade();
             m_lastUpgradeWave = m_wave.wave;
@@ -2153,8 +2368,9 @@ void Engine::updateWaves() {
     }
 
     // Intermission has elapsed: advance to the next wave (or trigger the boss).
-    m_wave.intermissionArmed = false;
-    advanceWave(m_wave, m_waveConfig);
+    // ds.wave.advance() also clears intermission_armed.
+    m_scripts.waveAdvance();
+    m_wave = m_scripts.readWaveState();
     if (m_wave.cleared) {
         // Final wave cleared: instead of an immediate Victory, spawn ONE boss as
         // the climactic encounter (task 40). bossSystem flips the state to
@@ -2165,10 +2381,10 @@ void Engine::updateWaves() {
         return;
     }
     if (m_wave.spawnPending) {
-        int n = enemiesForWave(m_wave.wave, m_waveConfig);
+        int n = m_scripts.waveEnemiesForWave(m_wave.wave);
         spawnWaveEnemies(n);
-        m_wave.aliveEnemies = n;
-        m_wave.spawnPending = false;
+        m_scripts.waveMarkSpawned(n);
+        m_wave = m_scripts.readWaveState();
         m_scripts.onWaveStart(m_wave.wave);
     }
 }
@@ -2229,6 +2445,81 @@ void Engine::renderDepthOnly(rhi::IRHICommandList* cmd, const glm::mat4& lightSp
         const MeshComponent& mesh = batchMesh[batches[bi].key];
         cmd->setVertexBuffer(0, mesh.vertexBuffer);
         cmd->setVertexBuffer(1, m_shadowInstanceBuffer, firstInstance[bi] * kMat4Size);
+        cmd->setIndexBuffer(mesh.indexBuffer, mesh.indexType);
+        cmd->drawIndexed(batches[bi].indexCount, instanceCount[bi], 0, 0, 0);
+    }
+}
+
+void Engine::renderPointShadowFace(rhi::IRHICommandList* cmd, int face, const glm::mat4& faceLightSpace,
+                                   const glm::vec3& lightPos) {
+    cmd->setPipeline(m_pointShadowPipeline);
+
+    // point_shadow_depth.slang's gPush is read by BOTH the vertex stage
+    // (lightSpace, to place the geometry) and the fragment stage (lightPos,
+    // to compute distance-from-light per pixel) — each stage's independently
+    // compiled module needs its own copy of the same payload, so push it to
+    // both uniform domains rather than just the vertex one (contrast
+    // renderDepthOnly's shadow_depth.slang, whose trivial fragment never
+    // touches gPush).
+    struct PointShadowPush {
+        glm::mat4 lightSpace;
+        glm::vec3 lightPos;
+        float pad0 = 0.f;
+    } push{faceLightSpace, lightPos, 0.f};
+    cmd->pushVertexConstants(&push, sizeof(push));
+    cmd->pushFragmentConstants(&push, sizeof(push));
+
+    // Same instanced-batch logic as renderDepthOnly, duplicated rather than
+    // shared: this pass uses its own per-face instance buffer (see
+    // m_pointShadowInstanceBuffer's comment in Engine.h) and a different
+    // push-constant payload, so factoring out the batch loop would buy little
+    // beyond an extra indirection in code that — unlike most of this
+    // session's work — cannot be exercised by ctest and is easier to audit
+    // duplicated than threaded through a shared helper.
+    std::vector<InstanceDraw> draws;
+    std::unordered_map<InstanceKey, MeshComponent, InstanceKeyHash> batchMesh;
+    auto view = m_world.view<Transform, MeshComponent>();
+    for (auto entity : view) {
+        auto& transform = view.get<Transform>(entity);
+        auto& mesh      = view.get<MeshComponent>(entity);
+
+        InstanceKey key{mesh.vertexBuffer.ptr, mesh.indexBuffer.ptr, nullptr};
+        InstanceDraw d;
+        d.key        = key;
+        d.indexCount = mesh.indexCount;
+        d.indexType  = mesh.indexType;
+        d.model      = transform.modelMatrix();
+        draws.push_back(d);
+        batchMesh.try_emplace(key, mesh);
+    }
+
+    std::vector<DrawBatch> batches = buildBatches(draws);
+
+    std::vector<glm::mat4> instanceData;
+    std::vector<uint32_t> firstInstance(batches.size(), 0);
+    std::vector<uint32_t> instanceCount(batches.size(), 0);
+    for (size_t bi = 0; bi < batches.size(); ++bi) {
+        firstInstance[bi] = static_cast<uint32_t>(instanceData.size());
+        for (const glm::mat4& model : batches[bi].models) {
+            if (static_cast<uint32_t>(instanceData.size()) >= kMaxInstances)
+                break;
+            instanceData.push_back(model);
+        }
+        instanceCount[bi] = static_cast<uint32_t>(instanceData.size()) - firstInstance[bi];
+    }
+
+    if (instanceData.empty())
+        return;
+    rhi::RHIBuffer instanceBuffer = m_pointShadowInstanceBuffer[face];
+    m_device->uploadImmediate(instanceBuffer, instanceData.data(), instanceData.size() * sizeof(glm::mat4), 0);
+
+    constexpr uint64_t kMat4Size = sizeof(glm::mat4);
+    for (size_t bi = 0; bi < batches.size(); ++bi) {
+        if (instanceCount[bi] == 0)
+            continue;
+        const MeshComponent& mesh = batchMesh[batches[bi].key];
+        cmd->setVertexBuffer(0, mesh.vertexBuffer);
+        cmd->setVertexBuffer(1, instanceBuffer, firstInstance[bi] * kMat4Size);
         cmd->setIndexBuffer(mesh.indexBuffer, mesh.indexType);
         cmd->drawIndexed(batches[bi].indexCount, instanceCount[bi], 0, 0, 0);
     }
@@ -2302,15 +2593,50 @@ void Engine::render() {
     shakeCam.pitch += glm::degrees(m_recoil.offset.y + shake.x);
     glm::mat4 viewProj = shakeCam.projMatrix(aspect) * shakeCam.viewMatrix();
 
-    // Light-space matrix for the sun shadow map, rebuilt each frame. Static
-    // bounds covering the 20x5x20 arena (walls at +-10 in X/Z, floor at y=0,
-    // ceiling ~5) with generous slack so tall casters / spawned geometry stay
-    // inside the ortho frustum. kSunDir is the *toward-the-sun* vector (the L
-    // used in mesh.slang's BRDF, pointing up at +Y); sunLightSpaceMatrix wants
-    // the direction the light TRAVELS, so we negate it to place the shadow
-    // camera above the scene looking down.
-    const ds::Bounds arenaBounds{glm::vec3{-12.f, -2.f, -12.f}, glm::vec3{12.f, 8.f, 12.f}};
-    m_sunLightSpace = ds::sunLightSpaceMatrix(-kSunDir, arenaBounds);
+    // Light-space matrix for the sun shadow map, rebuilt each frame. Uses
+    // m_levelBounds (the actual loaded level's AABB, computed once in
+    // initScene() — see its comment) rather than a fixed box: a multi-room
+    // Lua-generated level can span far more than a single 20x5x20 arena, and
+    // a fragment outside this box is treated as unconditionally lit by
+    // sampleSunShadow's out-of-frustum fallback, which is exactly what reads
+    // as "fullbright" everywhere beyond the box. kSunDir is the *toward-the-
+    // sun* vector (the L used in mesh.slang's BRDF, pointing up at +Y);
+    // sunLightSpaceMatrix wants the direction the light TRAVELS, so we negate
+    // it to place the shadow camera above the scene looking down.
+    m_sunLightSpace = ds::sunLightSpaceMatrix(-kSunDir, m_levelBounds);
+
+    // Point-light shadow: pick whichever active light is nearest the camera
+    // to shadow-cast this frame (scoped to exactly one caster per frame to
+    // keep cost bounded — every other simultaneous point light stays
+    // unshadowed exactly as before). Rebuilt every frame since the nearest
+    // light changes as the player moves between rooms.
+    struct PointShadowFrame {
+        bool active = false;
+        glm::vec3 lightPos{0.f};
+        glm::mat4 faceMatrices[6]{};
+    } pointShadow;
+    {
+        int bestIdx      = -1;
+        float bestDistSq = std::numeric_limits<float>::max();
+        for (int32_t i = 0; i < m_lightBuffer.count; ++i) {
+            glm::vec3 lp      = glm::vec3(m_lightBuffer.lights[i].posRadius);
+            glm::vec3 toLight = lp - m_camera.position;
+            float distSq      = glm::dot(toLight, toLight);
+            if (distSq < bestDistSq) {
+                bestDistSq = distSq;
+                bestIdx    = static_cast<int>(i);
+            }
+        }
+        if (bestIdx >= 0) {
+            const GpuLight& light  = m_lightBuffer.lights[bestIdx];
+            pointShadow.active     = true;
+            pointShadow.lightPos   = glm::vec3(light.posRadius);
+            const float farZ       = std::max(light.posRadius.w, 1.0f);
+            constexpr float kNearZ = 0.05f;
+            for (int face = 0; face < 6; ++face)
+                pointShadow.faceMatrices[face] = ds::pointShadowFaceMatrix(pointShadow.lightPos, face, kNearZ, farZ);
+        }
+    }
 
     // Build the frame as a declarative pass list (task 23). The shadow and
     // scene passes are added to the graph; bloom still manages its own internal
@@ -2345,6 +2671,40 @@ void Engine::render() {
         m_renderGraph.addPass(std::move(shadowPass));
     }
 
+    // --- Point shadow passes: 6 cube faces -> m_pointShadowFaces[face]. -----
+    // Distance-based (ShadowMatrix.h / point_shadow_depth.slang): each face's
+    // color target clears to a large distance so an unshadowed pixel (no
+    // light selected, or shadows off on the Minimum tier) reads as fully lit.
+    // Always added to the graph (mirrors the sun shadow pass above) so the
+    // textures stay in a defined cleared state for the scene pass to bind;
+    // the actual per-object draws are gated by drawThisFace below.
+    for (int face = 0; face < 6; ++face) {
+        rhi::ColorAttachment color{};
+        color.texture       = m_pointShadowFaces[face];
+        color.loadOp        = rhi::LoadOp::Clear;
+        color.storeOp       = rhi::StoreOp::Store;
+        color.clearColor[0] = 1e9f;
+
+        rhi::DepthAttachment depth{};
+        depth.texture    = m_pointShadowDepthScratch;
+        depth.loadOp     = rhi::LoadOp::Clear;
+        depth.storeOp    = rhi::StoreOp::DontCare;
+        depth.clearDepth = 1.0f;
+
+        RenderPass facePass;
+        facePass.name                  = "pointShadowFace";
+        facePass.colorAttachments      = {color};
+        facePass.depthAttachment       = depth;
+        const bool drawThisFace        = m_quality.shadows && pointShadow.active;
+        const glm::mat4 faceLightSpace = pointShadow.faceMatrices[face];
+        const glm::vec3 lightPos       = pointShadow.lightPos;
+        facePass.record                = [this, face, faceLightSpace, lightPos, drawThisFace](rhi::IRHICommandList& c) {
+            if (drawThisFace)
+                renderPointShadowFace(&c, face, faceLightSpace, lightPos);
+        };
+        m_renderGraph.addPass(std::move(facePass));
+    }
+
     // --- Pass A: scene + particles -> offscreen HDR target. ----------------
     {
         rhi::ColorAttachment color{};
@@ -2366,7 +2726,7 @@ void Engine::render() {
         scenePass.name             = "scene";
         scenePass.colorAttachments = {color};
         scenePass.depthAttachment  = depth;
-        scenePass.record           = [this, viewProj](rhi::IRHICommandList& c) {
+        scenePass.record           = [this, viewProj, pointShadow](rhi::IRHICommandList& c) {
             rhi::IRHICommandList* cmd = &c;
             // Bind the shadow map (fragment texture slot 1) and push the
             // light-space matrix (fragment uniform slot 2) once; both are
@@ -2382,6 +2742,25 @@ void Engine::render() {
                 int32_t pad2 = 0;
             } shadowData{m_sunLightSpace, static_cast<int32_t>(m_shadowMapSize), 0, 0, 0};
             cmd->pushFragmentConstants(&shadowData, sizeof(shadowData), 2);
+
+            // Bind the 6 point-shadow face textures (fragment texture slots
+            // 2..7) and push their face matrices + the shadow-casting light's
+            // position (fragment uniform slot 3). lightPosActive.w is the
+            // active flag mesh.slang checks before applying any occlusion;
+            // when no light was selected this frame the faces are all-cleared
+            // distance (see the pass loop above) and active is 0, so
+            // samplePointShadow is simply never invoked.
+            for (int face = 0; face < 6; ++face)
+                cmd->bindFragmentTexture(2u + static_cast<uint32_t>(face), m_pointShadowFaces[face],
+                                                   m_pointShadowSampler);
+            struct PointShadowUniform {
+                glm::mat4 faceMatrices[6];
+                glm::vec4 lightPosActive;
+            } pointShadowUniform{};
+            for (int face = 0; face < 6; ++face)
+                pointShadowUniform.faceMatrices[face] = pointShadow.faceMatrices[face];
+            pointShadowUniform.lightPosActive = glm::vec4(pointShadow.lightPos, pointShadow.active ? 1.f : 0.f);
+            cmd->pushFragmentConstants(&pointShadowUniform, sizeof(pointShadowUniform), 3);
 
             // Always draw the 3D scene so the world is visible behind paused
             // overlays (Dead / Victory) and so the Menu has a backdrop. The
