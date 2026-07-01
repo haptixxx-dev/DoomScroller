@@ -1,5 +1,6 @@
 #include "SDL3Device.h"
 
+#include "engine/QualityProfile.h" // ds::capsFromRawQuery — sanitize the raw device query (task 55)
 #include "engine/rhi/TextureReadback.h"
 
 #include <cstring>
@@ -18,6 +19,90 @@ static void sdlCheck(bool ok, const char* msg) {
 }
 
 // ---------------------------------------------------------------------------
+// Real device-capability query (task 55).
+//
+// HONEST SCOPE — READ BEFORE "FIXING": the SDL3 GPU API (this codebase pins
+// SDL 3.4.10) exposes NO portable query for device VRAM, mesh shaders, or
+// bindless/descriptor-indexing, and — critically — it exposes NO native-handle
+// escape hatch either. `nativeDevice()` returns the opaque `SDL_GPUDevice*`
+// (SDL's own wrapper), and there is no public SDL entry point that hands back
+// the backing `VkPhysicalDevice` / `ID3D12Device` / `MTLDevice` it selected
+// internally (`SDL_vulkan.h`/`SDL_metal.h` are for the *window* surface, not
+// the GPU device). So the "drop through to vkGetPhysicalDeviceMemoryProperties
+// / IDXGIAdapter3::QueryVideoMemoryInfo / MTLDevice.recommendedMaxWorkingSetSize"
+// route the plan sketches is NOT reachable with this SDL: there is no handle to
+// call those on. We deliberately do NOT fabricate a native probe — casting the
+// opaque handle to a Vk/D3D12/Metal type is undefined behaviour and would crash
+// on real hardware. Per the task rule ("if a backend has no reachable native
+// query, leave that cap at its conservative default and document it — do NOT
+// guess"), the feature bits and VRAM stay at their conservative defaults on
+// EVERY backend.
+//
+// What we CAN query portably, and do here:
+//   * SDL_GetGPUShaderFormats  — the accepted shader bytecode formats.
+//   * SDL_GetGPUDeviceDriver   — the backend name ("vulkan"/"direct3d12"/"metal").
+//   * SDL_GetGPUDeviceProperties -> SDL_PROP_GPU_DEVICE_NAME_STRING /
+//     _DRIVER_NAME_STRING — device + driver name strings, for diagnosis only.
+//
+// We do NOT parse the device-name string to guess VRAM/features — SDL's own
+// header warns at length that the string is inconsistent and unparseable, so
+// deriving capability from it would just be the old shader-format guess wearing
+// a hat. The removed heuristic (DXIL||MSL => meshShaders=bindless=true) was an
+// over-promise: it forced Enhanced on any D3D12/Metal device regardless of the
+// actual silicon. That is exactly the "never over-promise Enhanced" failure the
+// task forbids, so it is gone.
+//
+// The assembled raw caps are run through the pure, unit-tested
+// ds::capsFromRawQuery() sanitizer (QualityProfile.h) before they are trusted,
+// so a driver that reports a zero/garbage maxTextureDim collapses to the
+// conservative Minimum path rather than leaking bogus feature bits downstream.
+//
+// UNVERIFIED-ON-HARDWARE: the *values* below (that a given card really is
+// Minimum, that maxTextureDim is correct for the backend) can only be confirmed
+// on a GPU at the bench; this sandbox verifies the query COMPILES on all three
+// backends and that the caps->tier logic still holds. When a future SDL exposes
+// a real VRAM/mesh/bindless query (or a native-handle accessor), populate the
+// three conservative fields here — the sanitizer + selectTier below are ready.
+// ---------------------------------------------------------------------------
+static RHICaps queryCaps(SDL_GPUDevice* gpu) {
+    RHICaps raw{};
+
+    // Known-good portable limits. SDL's supported backends (Vulkan 1.0+, D3D12,
+    // Metal) all guarantee at least a 16384 max 2D texture dimension, and the
+    // RHI's push-constant budget is 128 bytes across backends.
+    raw.maxTextureDim     = 16384;
+    raw.maxPushConstBytes = 128;
+
+    // Conservative feature defaults: SDL3 exposes no query for these and no
+    // reachable native handle to probe, so we cannot confirm them here. 0/false
+    // forces Minimum in selectTier — never over-promising Enhanced.
+    raw.deviceVRAMBytes = 0;
+    raw.meshShaders     = false;
+    raw.bindless        = false;
+    raw.rayTracing      = false;
+
+    // Diagnostics: log what SDL *does* tell us so a human validating on real
+    // hardware can see which device/driver was picked and the resolved tier.
+    const char* driver              = SDL_GetGPUDeviceDriver(gpu); // "vulkan"/"metal"/...
+    const SDL_GPUShaderFormat fmts  = SDL_GetGPUShaderFormats(gpu);
+    const char* deviceName          = "unknown device";
+    const char* driverName          = "unknown driver";
+    const SDL_PropertiesID deviceId = SDL_GetGPUDeviceProperties(gpu);
+    if (deviceId != 0) {
+        deviceName = SDL_GetStringProperty(deviceId, SDL_PROP_GPU_DEVICE_NAME_STRING, "unknown device");
+        driverName = SDL_GetStringProperty(deviceId, SDL_PROP_GPU_DEVICE_DRIVER_NAME_STRING, "unknown driver");
+    }
+    SDL_LogInfo(SDL_LOG_CATEGORY_GPU,
+                "[caps] backend=%s device=\"%s\" driver=\"%s\" shaderFmts=0x%x "
+                "(VRAM/meshShaders/bindless unqueryable via SDL3 GPU -> conservative Minimum; "
+                "device values UNVERIFIED until bench)",
+                driver ? driver : "?", deviceName, driverName, static_cast<unsigned>(fmts));
+
+    // Defend selectTier from any garbage the (portable) query produced.
+    return ds::capsFromRawQuery(raw);
+}
+
+// ---------------------------------------------------------------------------
 // SDL3Device
 // ---------------------------------------------------------------------------
 SDL3Device::SDL3Device(SDL_Window* window) : m_window(window) {
@@ -31,30 +116,7 @@ SDL3Device::SDL3Device(SDL_Window* window) : m_window(window) {
     sdlCheck(m_gpu != nullptr, "SDL_CreateGPUDevice");
     sdlCheck(SDL_ClaimWindowForGPUDevice(m_gpu, m_window), "SDL_ClaimWindowForGPUDevice");
 
-    m_caps.maxTextureDim     = 16384;
-    m_caps.maxPushConstBytes = 128;
-
-    // Best-effort capability population (task 34). SDL3 GPU deliberately exposes
-    // a small, portable surface: it has NO query for mesh shaders, bindless, or
-    // device VRAM. So we derive the two feature flags QualityProfile::selectTier
-    // reads (meshShaders / bindless) from the shader format the driver chose, and
-    // leave deviceVRAMBytes at 0 ("unknown"). selectTier treats 0 VRAM
-    // conservatively as Minimum, so an unknown VRAM never over-promises.
-    //
-    // Heuristic: a DXIL-capable backend is the modern D3D12 path, and an MSL
-    // backend is Metal on Apple Silicon / recent Macs — both ship on hardware
-    // that comfortably clears the "Enhanced" bar (mesh shaders + bindless-style
-    // descriptor indexing) in practice. The Vulkan/SPIR-V path covers everything
-    // from a GTX 1060 up, so we cannot assume Enhanced from SPIR-V alone and
-    // leave the flags false there (Minimum unless a future VRAM query says
-    // otherwise). This is intentionally conservative; correctness of the render
-    // path does not depend on the tier, only its cost.
-    const SDL_GPUShaderFormat fmts = SDL_GetGPUShaderFormats(m_gpu);
-    if ((fmts & SDL_GPU_SHADERFORMAT_DXIL) != 0u || (fmts & SDL_GPU_SHADERFORMAT_MSL) != 0u) {
-        m_caps.meshShaders = true;
-        m_caps.bindless    = true;
-    }
-    m_caps.deviceVRAMBytes = 0; // SDL3 GPU exposes no VRAM query; 0 == unknown.
+    m_caps = queryCaps(m_gpu);
 
     m_frameCmd = new SDL3CommandList(m_gpu, m_window);
 }
