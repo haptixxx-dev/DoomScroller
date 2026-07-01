@@ -29,6 +29,10 @@ struct ArchetypeStats {
 //             high chargeSpeed), tankier, longer reach to start the lunge.
 //   Ranged  - slower, keeps distance, fires projectiles (projectileSpeed > 0)
 //             from a long attackRange, lower health (glass cannon).
+//   Brute   - very slow, very tanky melee bruiser: huge health, low move speed,
+//             heavy hits on a long swing interval (no charge, no projectile).
+//   Spitter - fast, fragile burst-ranged: low health, short attack interval so
+//             it fires rapid volleys (projectileSpeed > 0).
 inline ArchetypeStats archetypeDefaults(EnemyArchetype type) {
     switch (type) {
     case EnemyArchetype::Charger:
@@ -54,6 +58,30 @@ inline ArchetypeStats archetypeDefaults(EnemyArchetype type) {
             /*chargeWindup*/ 0.f,
             /*chargeSpeed*/ 0.f,
             /*projectileSpeed*/ 18.f,
+        };
+    case EnemyArchetype::Brute:
+        return ArchetypeStats{
+            /*moveSpeed*/ 2.f,
+            /*attackRange*/ 2.f,
+            /*attackDamage*/ 30,
+            /*detectionRange*/ 16.f,
+            /*health*/ 300,
+            /*attackInterval*/ 1.8f,
+            /*chargeWindup*/ 0.f,
+            /*chargeSpeed*/ 0.f,
+            /*projectileSpeed*/ 0.f,
+        };
+    case EnemyArchetype::Spitter:
+        return ArchetypeStats{
+            /*moveSpeed*/ 4.f,
+            /*attackRange*/ 11.f,
+            /*attackDamage*/ 6,
+            /*detectionRange*/ 22.f,
+            /*health*/ 45,
+            /*attackInterval*/ 0.6f,
+            /*chargeWindup*/ 0.f,
+            /*chargeSpeed*/ 0.f,
+            /*projectileSpeed*/ 22.f,
         };
     case EnemyArchetype::Grunt:
     default:

@@ -44,6 +44,8 @@ add_executable(ds_engine_tests
     test_boss.cpp
     test_procedural_textures.cpp
     test_golden_image.cpp
+    test_metaprogression.cpp
+    test_economy.cpp
 )
 target_link_libraries(ds_engine_tests PRIVATE engine_math engine_headers Catch2::Catch2WithMain)
 add_test(NAME ds_engine_tests COMMAND ds_engine_tests)

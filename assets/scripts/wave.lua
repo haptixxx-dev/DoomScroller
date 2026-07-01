@@ -29,19 +29,70 @@ ds.wave = {
         intermission_time = 3.0,
         kill_score = 100,
         combo_window = 3.0,
+        -- 1-based index into `difficulties` below (1 = EASY, 2 = NORMAL, 3 = HARD).
+        difficulty = 2,
+        -- Difficulty scalars folded into spawn counts and enemy HP. enemy_mult
+        -- scales the per-wave count, count_bonus is a flat add, hp_mult scales
+        -- the wave HP curve. NORMAL is the neutral (1/1/0) baseline.
+        difficulties = {
+            [1] = { enemy_mult = 0.75, hp_mult = 0.85, count_bonus = 0 }, -- EASY
+            [2] = { enemy_mult = 1.0, hp_mult = 1.0, count_bonus = 0 }, -- NORMAL
+            [3] = { enemy_mult = 1.25, hp_mult = 1.25, count_bonus = 1 }, -- HARD
+        },
     },
 }
 
+-- Current difficulty scalar table, clamped to a valid index (never nil).
+local function current_difficulty()
+    local cfg = ds.wave.config
+    local idx = cfg.difficulty or 2
+    local d = cfg.difficulties[idx]
+    if not d then
+        d = cfg.difficulties[2]
+    end
+    return d
+end
+
+--- Selects the active difficulty by 1-based index, clamped to the number of
+-- entries in ds.wave.config.difficulties so an out-of-range request is safe.
+-- @param index 1-based difficulty index (1 = EASY, 2 = NORMAL, 3 = HARD)
+-- @return integer the clamped index actually stored
+function ds.wave.set_difficulty(index)
+    local n = #ds.wave.config.difficulties
+    if index < 1 then
+        index = 1
+    elseif index > n then
+        index = n
+    end
+    ds.wave.config.difficulty = index
+    return index
+end
+
 --- Enemy count for a given 1-based wave, escalating by enemies_per_wave each
--- wave and clamped to max_enemies_per_wave. Out-of-range waves spawn nothing.
+-- wave, scaled by the active difficulty's enemy_mult (+count_bonus), then
+-- clamped to max_enemies_per_wave. Out-of-range waves spawn nothing.
 -- @param wave 1-based wave number
 -- @return integer enemy count for this wave (0 if wave < 1)
 function ds.wave.enemies_for_wave(wave)
     if wave < 1 then
         return 0
     end
-    local count = ds.wave.config.base_enemies + (wave - 1) * ds.wave.config.enemies_per_wave
+    local d = current_difficulty()
+    local base = ds.wave.config.base_enemies + (wave - 1) * ds.wave.config.enemies_per_wave
+    local count = math.floor(base * d.enemy_mult) + d.count_bonus
     return math.min(count, ds.wave.config.max_enemies_per_wave)
+end
+
+--- Monotonic per-wave HP scale for enemies: grows 8% per wave past the first,
+-- multiplied by the active difficulty's hp_mult. Waves < 1 clamp to wave 1.
+-- @param wave 1-based wave number
+-- @return number multiplicative HP scale (>= hp_mult, monotonic in wave)
+function ds.wave.enemy_hp_scale(wave)
+    if wave < 1 then
+        wave = 1
+    end
+    local d = current_difficulty()
+    return (1.0 + (wave - 1) * 0.08) * d.hp_mult
 end
 
 --- Points for a single kill given the combo count *after* the kill is

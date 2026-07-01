@@ -32,11 +32,17 @@
 //         r  g  b   = vertex tint, 0..1
 //       materialRef is always 0 (default material) from text.
 //
-//   spawn x y z   <kind>
-//       A spawn point. 3 floats + a kind token:
-//         x y z   = world position
-//         <kind>  = "player" -> sets SpawnPointRecord.flags bit0 (player start)
-//                   "enemy"  -> leaves flags 0
+//   spawn x y z   <kind>   [archetype]
+//       A spawn point. 3 floats + a kind token + an OPTIONAL archetype token:
+//         x y z      = world position
+//         <kind>     = "player" -> sets SpawnPointRecord.flags bit0 (player start)
+//                      "enemy"  -> leaves flags bit0 clear
+//         archetype  = enemy-only hint: "grunt" | "charger" | "ranged". Encoded
+//                      into flags bits 1-2 as (EnemyArchetype value + 1), i.e.
+//                      grunt=1, charger=2, ranged=3 (LevelFormat.h /
+//                      SpawnPoint::archetypeHint). Omitting it leaves bits 1-2
+//                      clear ("no hint", engine picks by wave/index). An
+//                      archetype token on a "player" spawn is an error.
 //
 //   light x y z   r g b   radius intensity
 //       A light. 8 floats:
@@ -179,8 +185,10 @@ inline std::optional<LevelData> parseLevelText(std::string_view text, std::strin
             b.materialRef    = 0;
             data.boxes.push_back(b);
         } else if (kind == "spawn") {
-            if (tok.size() != 5) {
-                return fail(lineNo, "spawn expects 3 numbers + a kind (x y z player|enemy)");
+            // 5 tokens = position + kind; 6 tokens = ... + an enemy archetype hint.
+            if (tok.size() != 5 && tok.size() != 6) {
+                return fail(lineNo, "spawn expects 3 numbers + a kind + optional archetype "
+                                    "(x y z player|enemy [grunt|charger|ranged])");
             }
             SpawnPointRecord s{};
             float vals[3] = {};
@@ -194,9 +202,28 @@ inline std::optional<LevelData> parseLevelText(std::string_view text, std::strin
             s.position[2]              = vals[2];
             const std::string_view who = tok[4];
             if (who == "player") {
+                if (tok.size() == 6) {
+                    return fail(lineNo, "a 'player' spawn takes no archetype token");
+                }
                 s.flags = 1u; // bit0 = player start
             } else if (who == "enemy") {
                 s.flags = 0u;
+                if (tok.size() == 6) {
+                    // Encode the archetype hint into bits 1-2 as (value + 1):
+                    // grunt=1, charger=2, ranged=3 (LevelFormat.h).
+                    const std::string_view arch = tok[5];
+                    uint32_t archValue          = 0;
+                    if (arch == "grunt") {
+                        archValue = 0u;
+                    } else if (arch == "charger") {
+                        archValue = 1u;
+                    } else if (arch == "ranged") {
+                        archValue = 2u;
+                    } else {
+                        return fail(lineNo, "spawn archetype must be 'grunt', 'charger' or 'ranged'");
+                    }
+                    s.flags = (archValue + 1u) << 1u;
+                }
             } else {
                 return fail(lineNo, "spawn kind must be 'player' or 'enemy'");
             }

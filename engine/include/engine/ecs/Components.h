@@ -54,7 +54,11 @@ struct HealthComponent {
 //   Grunt   - basic melee chaser (today's behavior).
 //   Charger - faster; telegraphs a lunge (chargeWindup) then sprints (chargeSpeed).
 //   Ranged  - keeps distance and fires projectiles (projectileSpeed > 0).
-enum class EnemyArchetype : uint8_t { Grunt, Charger, Ranged };
+//   Brute   - slow, very tanky melee bruiser (reuses the Grunt melee branch).
+//   Spitter - fast, low-HP burst ranged shooter (reuses the Ranged branch).
+// APPEND-ONLY: values are persisted (SpawnPointRecord archetype hint) and
+// mirrored in enemy_ai.lua, so new families are added at the end.
+enum class EnemyArchetype : uint8_t { Grunt, Charger, Ranged, Brute, Spitter };
 
 struct EnemyComponent {
     enum class State : uint8_t { Idle, Chase, Attack };
