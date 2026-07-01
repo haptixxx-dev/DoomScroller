@@ -81,8 +81,45 @@ jobs:
       - name: Build
         run: cmake --build --preset release --parallel
 
-      - name: Run tests
+      # Build the offline tools explicitly so a tool link break is attributed to
+      # a named step (they are also part of `all`, so the step above already
+      # compiles them; this is for failure isolation + clarity).
+      - name: Build offline tools
+        run: cmake --build --preset release --target level_convert asset_cook --parallel
+
+      # Runs all ctest suites INCLUDING the ds_smoke headless smoke target
+      # (registered as a ctest in tests/CMakeLists.txt), which constructs the
+      # device-independent engine subsystems without a GPU.
+      - name: Run tests (incl. ds_smoke)
         run: ctest --test-dir build/release --output-on-failure
+
+      # Exercise the asset cook pipeline headlessly on one platform (the tools
+      # are OS-independent, so Linux coverage is sufficient and avoids the
+      # Windows .exe-suffix path handling). The level_convert `cmp` asserts the
+      # text->.dslv round-trip still matches the committed arena.dslv.
+      - name: Cook sample assets
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          set -e
+          TOOLS=build/release/tools
+          mkdir -p build/release/cooked
+          "$TOOLS/level_convert" build/release/cooked/arena.dslv assets/levels/arena.txt
+          cmp assets/levels/arena.dslv build/release/cooked/arena.dslv
+          "$TOOLS/asset_cook" assets/textures/sample.png build/release/cooked/sample.dstex
+
+      - name: Upload build artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: doomscroller-${{ matrix.os }}
+          path: |
+            build/release/bin/DoomScroller*
+            build/release/tools/level_convert*
+            build/release/tools/asset_cook*
+            build/release/shaders/**
+            build/release/cooked/**
+          if-no-files-found: warn
+          retention-days: 14
 
   # --------------------------------------------------------------------------
   # clang-format check
