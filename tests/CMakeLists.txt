@@ -43,9 +43,31 @@ add_executable(ds_engine_tests
     test_userstorage.cpp
     test_boss.cpp
     test_procedural_textures.cpp
+    test_golden_image.cpp
 )
 target_link_libraries(ds_engine_tests PRIVATE engine_math engine_headers Catch2::Catch2WithMain)
 add_test(NAME ds_engine_tests COMMAND ds_engine_tests)
+
+# Headless smoke target (PLAN task 46): NOT a Catch2 test. Links the FULL
+# `engine` lib and constructs every device-independent subsystem (physics,
+# audio, Lua scripts, particles, ECS) without creating a GPU device/window, so
+# CI surfaces link / static-init-order / PIMPL-ctor regressions the GPU-gated
+# build cannot in a headless sandbox. Returns non-zero on any failed check.
+add_executable(ds_smoke smoke_main.cpp)
+target_link_libraries(ds_smoke PRIVATE engine)
+# Locate the shipped Lua scripts via the source tree regardless of preset. CI
+# runs the release preset (DS_DEV OFF) where ds::paths::assets() resolves to a
+# binary-relative dir with no assets staged next to the exe; baking the source
+# assets/ dir keeps the script-load smoke checks green there (mirrors the
+# DS_ASSETS_DIR injection used by ds_script_tests below).
+target_compile_definitions(ds_smoke PRIVATE DS_ASSETS_DIR="${CMAKE_SOURCE_DIR}/assets")
+# macOS: force-load mimalloc so its __interpose section survives dead-stripping
+# from the static lib (same rationale as the DoomScroller exe; see
+# game/CMakeLists.txt). Without it a thread-exit free crosses allocator zones.
+if(APPLE)
+    target_link_options(ds_smoke PRIVATE -Wl,-force_load,$<TARGET_FILE:mimalloc-static>)
+endif()
+add_test(NAME ds_smoke COMMAND ds_smoke)
 
 # Lua scripting test: validates the lua link + binding plumbing. Compiles
 # ScriptSystem.cpp directly and links lua_static (+ SDL3 for SDL_Log* only) so
