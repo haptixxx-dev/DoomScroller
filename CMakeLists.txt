@@ -174,35 +174,66 @@ if(DOXYGEN_FOUND)
 endif()
 
 # ---------------------------------------------------------------------------
-# CPack per-OS packaging (task 50 pre-work).
+# CPack per-OS packaging (task 50).
 #
-# Configures the packaging generators so `cpack` (after a build+install) emits a
-# distributable archive per platform. This lands the CONFIG only — running the
-# generators + a validated render to ship is the bench-side of task 50. Keeping
-# the config in-tree means a packaging misconfiguration surfaces at CMake
-# configure time (headless) rather than at release time. The install() rules in
-# game/CMakeLists.txt define the staged layout (exe + assets/ + shaders/).
+# Configures the packaging generators so `cpack` (after a build) emits a
+# distributable per platform that ships ONLY the runnable game: the executable
+# plus assets/ and shaders/ next to it, matching the binary-relative layout
+# ds::paths expects in shipping mode (DS_DEV OFF — see engine/src/Paths.cpp:
+# assets()=binDir/assets, shaders()=binDir/shaders, userDir=binDir/user). The
+# install() rules that stage that layout live in game/CMakeLists.txt under the
+# `game` CPack component; the macOS .app bundle is described there too.
+#
+# Dev-artifact trim: the vendored mimalloc + walterschell/Lua subprojects
+# register unconditional, component-LESS install() rules (their static libs,
+# headers, cmake package config, mimalloc.pc). Those land in CPack's implicit
+# `Unspecified` component. We DON'T carry them: everything we ship uses
+# `COMPONENT game`, and packaging is restricted to that one component via
+# CPACK_COMPONENTS_ALL. The load-bearing switch is CPACK_*_COMPONENT_INSTALL ON
+# per generator — without it the archive/DragNDrop generators do a MONOLITHIC
+# install that ignores component filtering and re-drags the whole Unspecified
+# dev tree back in (this is exactly why an earlier CPACK_COMPONENTS_ALL=game
+# alone did not trim anything). CMAKE_SKIP_INSTALL_RULES on the deps is NOT a
+# viable alternative here: it makes CMake omit the subdir cmake_install.cmake
+# entirely while the parent still include()s it, which hard-errors cpack.
 set(CPACK_PACKAGE_NAME "DoomScroller")
 set(CPACK_PACKAGE_VENDOR "DoomScroller")
 set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Fast 3D arena FPS")
-# Our game staging is a `game` CPack component. KNOWN REFINEMENT (bench-side
-# task 50): the vendored Lua/mimalloc subprojects register unconditional
-# component-less install() rules (headers, static libs, cmake config), so the
-# archive currently also carries an include/ lib/ share/ tree alongside the
-# runnable DoomScroller + assets/ + shaders/ layout. The game IS runnable from
-# the package as-is; trimming the dev artifacts needs either submodule install
-# suppression or a bespoke install-script, which is deferred to the real
-# per-OS packaging pass (.app / AppImage / installer) rather than done here.
+set(CPACK_PACKAGE_EXECUTABLES "DoomScroller" "DoomScroller")
+
+# Ship only the `game` component, packed into a single archive/installer.
 set(CPACK_COMPONENTS_ALL game)
 set(CPACK_COMPONENTS_GROUPING ALL_COMPONENTS_IN_ONE)
+# Enable per-component packaging for every generator we use, else the default
+# monolithic install ignores CPACK_COMPONENTS_ALL and re-includes the deps.
+set(CPACK_ARCHIVE_COMPONENT_INSTALL ON)
+set(CPACK_ARCHIVE_DoomScroller_FILE_NAME "DoomScroller-${PROJECT_VERSION}-${CMAKE_SYSTEM_NAME}")
+
 if(WIN32)
+    # ZIP is the always-works portable drop; NSIS produces a Start-menu / Program
+    # Files installer (config only — building it needs makensis on the runner).
     set(CPACK_GENERATOR "ZIP")
+    set(CPACK_NSIS_COMPONENT_INSTALL ON)
+    set(CPACK_NSIS_PACKAGE_NAME "DoomScroller")
+    set(CPACK_NSIS_DISPLAY_NAME "DoomScroller")
+    set(CPACK_NSIS_ENABLE_UNINSTALL_BEFORE_INSTALL ON)
+    set(CPACK_PACKAGE_INSTALL_DIRECTORY "DoomScroller")
 elseif(APPLE)
-    # Drag-install .dmg; the .app bundle + Info.plist + Metal shader staging is
-    # the bench-side refinement (task 50), this gives a shippable archive shape.
+    # macOS ships as a drag-install .dmg carrying the DoomScroller.app bundle
+    # (MACOSX_BUNDLE, Info.plist, Metal shaders staged in Contents/Resources —
+    # see game/CMakeLists.txt). TGZ is kept as a headless-verifiable fallback
+    # and for CI/no-hdiutil environments.
     set(CPACK_GENERATOR "DragNDrop;TGZ")
+    set(CPACK_DMG_COMPONENT_INSTALL ON)
+    set(CPACK_DMG_VOLUME_NAME "DoomScroller")
 else()
+    # Linux: a relocatable TGZ (exe + assets/ + shaders/, runnable in place via
+    # ds::paths' argv0-relative resolution). An AppImage is the nicer
+    # single-file distributable but needs the external linuxdeploy/appimagetool
+    # binaries fetched on the CI runner, so it's driven by a CI script rather
+    # than pure CPack — the TGZ here is the self-contained, headless-verifiable
+    # artifact and the AppImage's payload staging root.
     set(CPACK_GENERATOR "TGZ")
 endif()
 include(CPack)
