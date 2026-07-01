@@ -90,4 +90,29 @@ constexpr SaveData startRun(SaveData prev) {
     return prev;
 }
 
+// -----------------------------------------------------------------------------
+// Difficulty index mapping (Phase 4 Wave D wiring de-risk).
+//
+// SaveData.difficulty is 0-based (SaveData.h:101 — "0-based; wave.lua is
+// 1-based"). The Lua side, ds.wave.set_difficulty(index), is 1-based (wave.lua:
+// 1=EASY, 2=NORMAL, 3=HARD; default 2). So feeding the persisted difficulty into
+// the wave module needs a +1 conversion, and reading a chosen wave-index back
+// into the save needs a -1. These two pure helpers name that off-by-one so the
+// future Engine.cpp call-site swap can't get the direction wrong, and round-trip
+// exactly: waveToSaveDifficulty(saveDifficultyToWave(d)) == d.
+// -----------------------------------------------------------------------------
+
+// Convert a 0-based SaveData.difficulty into the 1-based index wave.lua's
+// ds.wave.set_difficulty expects (adds 1).
+constexpr int saveDifficultyToWave(uint32_t saveDifficulty) {
+    return static_cast<int>(saveDifficulty) + 1;
+}
+
+// Convert a 1-based wave.lua difficulty index back into a 0-based
+// SaveData.difficulty (subtracts 1; a <1 index clamps to 0, matching the fact
+// that the save can never hold a negative field).
+constexpr uint32_t waveToSaveDifficulty(int waveDifficulty) {
+    return waveDifficulty <= 1 ? 0u : static_cast<uint32_t>(waveDifficulty - 1);
+}
+
 } // namespace ds

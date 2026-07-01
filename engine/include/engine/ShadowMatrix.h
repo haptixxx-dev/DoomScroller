@@ -1,7 +1,13 @@
 #pragma once
 
+#include <algorithm>
+#include <array>
+#include <cmath>
+#include <cstddef>
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
+#include <limits>
+#include <vector>
 
 namespace ds {
 
@@ -132,6 +138,157 @@ inline glm::mat4 pointShadowFaceMatrix(const glm::vec3& lightPos, int face, floa
     const glm::mat4 view = glm::lookAt(lightPos, lightPos + cubeFaceDirection(face), cubeFaceUp(face));
     const glm::mat4 proj = glm::perspective(glm::radians(90.f), 1.f, nearZ, farZ);
     return proj * view;
+}
+
+// ---------------------------------------------------------------------------
+// Cascaded shadow maps + soft-shadow bias (task 59, pure math seams).
+//
+// A single ortho cascade sized to the whole scene wastes shadow resolution on
+// distant geometry; splitting the view frustum into a few depth slices and
+// fitting one ortho map per slice keeps near-camera shadows crisp. The split
+// scheme, the per-cascade fit, the acne/peter-panning bias offset, and the PCF
+// kernel tap tables are all pure — no RHI, no GPU — so they land + test here
+// while the actual array-texture rendering stays bench-gated.
+// ---------------------------------------------------------------------------
+
+// Practical Split Scheme (Zhang et al.) cascade split distances. Returns the FAR
+// distance of each of `numCascades` cascades along the view direction, in
+// increasing order; the near edge of cascade i is the far edge of cascade i-1
+// (with the first cascade's near edge == nearZ). The result therefore has
+// `numCascades` entries, the last of which equals `farZ`.
+//
+// Each split blends a logarithmic distribution (equal ratios — ideal for
+// perspective, packs resolution near the camera) with a uniform distribution
+// (equal spacing) by `lambda` in [0,1]:
+//   d_i = lambda * (near * (far/near)^(i/N))            // logarithmic
+//       + (1 - lambda) * (near + (far - near) * (i/N))  // uniform
+// lambda == 0 is pure uniform, lambda == 1 is pure logarithmic; the usual
+// practical value is ~0.5. Inputs are clamped to be well-formed (numCascades >=
+// 1, far > near > 0, lambda in [0,1]).
+inline std::vector<float> cascadeSplitDistances(float nearZ, float farZ, int numCascades, float lambda) {
+    const int count = std::max(numCascades, 1);
+    // Guard the log distribution against a non-positive near plane (division /
+    // ratio would blow up); nudge to a tiny positive epsilon.
+    const float safeNear = std::max(nearZ, 1e-4f);
+    const float safeFar  = std::max(farZ, safeNear + 1e-4f);
+    const float lam      = std::clamp(lambda, 0.f, 1.f);
+    const float ratio    = safeFar / safeNear;
+
+    std::vector<float> splits;
+    splits.reserve(static_cast<std::size_t>(count));
+    for (int i = 1; i <= count; ++i) {
+        const float p       = static_cast<float>(i) / static_cast<float>(count);
+        const float logDist = safeNear * std::pow(ratio, p);
+        const float uniDist = safeNear + (safeFar - safeNear) * p;
+        splits.push_back(lam * logDist + (1.f - lam) * uniDist);
+    }
+    // Pin the final split exactly to farZ (float pow/blend can drift a hair).
+    splits.back() = safeFar;
+    return splits;
+}
+
+// Fit an orthographic light-space view-projection matrix to a sub-frustum of the
+// camera view, given that sub-frustum's 8 world-space corners. This is the
+// per-cascade analogue of sunLightSpaceMatrix: instead of the whole scene, it
+// tightly wraps the corners of one cascade slice so the cascade spends its
+// resolution only on the geometry that slice covers.
+//
+// The corners are transformed into the light's view space (a lookAt from a point
+// backed off along -sunDir through the corners' centroid); the ortho box is the
+// axis-aligned bounds of the corners in that space. `zPadding` pulls the near
+// plane back so shadow casters *between* the light and the slice still render.
+// Uses the same up-vector degeneracy guard as sunLightSpaceMatrix. Pure.
+inline glm::mat4 sunCascadeMatrix(const glm::vec3& sunDir, const std::array<glm::vec3, 8>& frustumCorners,
+                                  float zPadding = 10.f) {
+    constexpr float kMinDirLength = 1e-6f;
+    const glm::vec3 dir = glm::length(sunDir) < kMinDirLength ? glm::vec3{0.f, -1.f, 0.f} : glm::normalize(sunDir);
+
+    glm::vec3 centroid{0.f};
+    for (const glm::vec3& c : frustumCorners)
+        centroid += c;
+    centroid /= static_cast<float>(frustumCorners.size());
+
+    glm::vec3 up{0.f, 1.f, 0.f};
+    if (glm::abs(glm::dot(dir, up)) > 0.99f)
+        up = glm::vec3{0.f, 0.f, 1.f};
+
+    // Back the eye off along the incoming light so all corners sit in front of
+    // the near plane; the exact distance is refined by the z-bounds below.
+    const glm::vec3 eye  = centroid - dir;
+    const glm::mat4 view = glm::lookAt(eye, centroid, up);
+
+    // Axis-aligned bounds of the corners in light view space.
+    glm::vec3 mn{std::numeric_limits<float>::max()};
+    glm::vec3 mx{std::numeric_limits<float>::lowest()};
+    for (const glm::vec3& c : frustumCorners) {
+        const glm::vec3 v = glm::vec3(view * glm::vec4(c, 1.f));
+        mn                = glm::min(mn, v);
+        mx                = glm::max(mx, v);
+    }
+
+    // In right-handed view space the camera looks down -z, so the corners have
+    // negative z; the ortho near/far are expressed as positive distances
+    // (glm::ortho(left,right,bottom,top,near,far)). Pad the near side so casters
+    // between the light and the slice are captured.
+    const float nearZ = -mx.z - zPadding;
+    const float farZ  = -mn.z + zPadding;
+
+    const glm::mat4 proj = glm::ortho(mn.x, mx.x, mn.y, mx.y, nearZ, farZ);
+    return proj * view;
+}
+
+// World-space bias offset that cures shadow acne (self-shadowing on lit
+// surfaces) and peter-panning (shadows detaching from the caster). Pushes the
+// sampled position along the surface normal by roughly one shadow texel, scaled
+// up on grazing surfaces where the normal is near-perpendicular to the light and
+// a single texel spans more depth.
+//
+// `texelWorldSize` is the world-space footprint of one shadow-map texel (light
+// frustum width / shadow map resolution). `slopeScale` (>= 0) adds extra offset
+// as the surface tilts away from the light; a value ~1-2 is typical. `normal`
+// need not be normalized. Returns a vector to ADD to the world position before
+// projecting into the shadow map. Pure.
+inline glm::vec3 normalOffsetBias(const glm::vec3& normal, float texelWorldSize, float slopeScale) {
+    const float len = glm::length(normal);
+    if (len < 1e-6f)
+        return glm::vec3{0.f};
+    const glm::vec3 n     = normal / len;
+    const float slope     = std::max(slopeScale, 0.f);
+    const float magnitude = texelWorldSize * (1.f + slope);
+    return n * magnitude;
+}
+
+// PCF (percentage-closer filtering) tap offsets for a 3x3 kernel, in shadow-map
+// texel units, normalized so the offsets span [-1,1] on each axis (multiply by
+// the per-texel UV size before sampling). The 9 taps are the center plus the 8
+// neighbours; averaging their depth comparisons softens the shadow edge. Pure
+// data — deterministic, symmetric about the origin, sums to (0,0).
+inline std::array<glm::vec2, 9> pcfKernel3x3() {
+    return std::array<glm::vec2, 9>{{
+        {-1.f, -1.f},
+        {0.f, -1.f},
+        {1.f, -1.f},
+        {-1.f, 0.f},
+        {0.f, 0.f},
+        {1.f, 0.f},
+        {-1.f, 1.f},
+        {0.f, 1.f},
+        {1.f, 1.f},
+    }};
+}
+
+// PCF tap offsets for a 5x5 kernel (25 taps), same convention as pcfKernel3x3:
+// normalized to [-1,1], symmetric about the origin, sums to (0,0). A wider
+// kernel gives softer penumbrae at more sampling cost.
+inline std::array<glm::vec2, 25> pcfKernel5x5() {
+    std::array<glm::vec2, 25> taps{};
+    std::size_t idx = 0;
+    for (int y = -2; y <= 2; ++y) {
+        for (int x = -2; x <= 2; ++x) {
+            taps[idx++] = glm::vec2{static_cast<float>(x) * 0.5f, static_cast<float>(y) * 0.5f};
+        }
+    }
+    return taps;
 }
 
 } // namespace ds
