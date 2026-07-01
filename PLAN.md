@@ -219,18 +219,23 @@ screenshot-diff harness turns every later render change into a regression test.
 | 54 | **Enemy + boss variety** | 30, 40 | More archetypes + hazards; multi-boss / multi-pattern encounters; data-driven via Lua + archetype fields |
 | 55 | **Real `RHICaps` device query** | - | Actual `deviceVRAMBytes` / mesh-shader / bindless detection from SDL3/native handles, replacing the stub that forces Vulkan/Linux to the Minimum tier |
 | 56 | **BC7 encoder** | 55 | A real BC7 compressor behind the `.dstex` cook seam (replaces the RGBA8 stub), gated on `RHICaps`; `TextureManager` BCn upload path exercised |
-| 57 | **Mesh-shader pipeline path** | 55 | The Enhanced-tier `VK_EXT_mesh_shader` / Metal mesh-shader path via `nativeDevice()`, tier-gated; the "why a custom engine" payoff |
-| 58 | **Bindless materials + GPU compute depth** | 55, 57 | Bindless material/texture arrays; fix the one-frame GPU-particle position lead; expand GPU compute usage (culling / sim) on the Enhanced tier |
-| 59 | **Real lighting overhaul** | 55, 57 | Cube/array texture RHI support, true multi-light shadow-casting (not just the nearest one), cascaded sun shadows, PCF/PCSS soft shadows, and a path off forward-16-lights toward clustered/deferred — see task detail below |
+| 57 | **Mesh-shader pipeline path** | 55 | **BLOCKED by SDL3-GPU (see note).** The Enhanced-tier `VK_EXT_mesh_shader` path via `nativeDevice()`, tier-gated; the "why a custom engine" payoff |
+| 58 | **Bindless materials + GPU compute depth** | 55, 57 | GPU-compute half DONE (particle one-frame lead fixed; `MaterialTable.h` CPU seam landed). **Bindless half BLOCKED by SDL3-GPU (see note).** |
+| 59 | **Real lighting overhaul** | 55 | Cube/array texture RHI support, true multi-light shadow-casting (not just the nearest one), cascaded sun shadows, PCF/PCSS soft shadows, and a path off forward-16-lights toward clustered/deferred — see task detail below. FEASIBLE: SDL3-GPU exposes `SDL_GPU_TEXTURETYPE_CUBE`/`2D_ARRAY`/`CUBE_ARRAY`. Dependency corrected to 55 only (57 is not a prerequisite and is blocked). |
+
+> **BLOCKED-by-SDL note (57 + 58-bindless), header-verified against pinned SDL `release-3.4.10`:**
+> SDL3's GPU API has only `VERTEX` + `FRAGMENT` + `COMPUTE` shader stages — **no mesh/task stage** — and no descriptor-indexing/bindless API. Critically, the `nativeDevice()` escape hatch the original design counted on for "drop to raw Vulkan for mesh shaders" **cannot reach raw Vulkan**: `nativeDevice()` returns the opaque `SDL_GPUDevice*`, and SDL exposes **no accessor** for the underlying `VkDevice`/`VkPhysicalDevice`/`VkCommandBuffer` (only `SDL_GetGPUDeviceProperties` name/driver strings + the input-only `SDL_GPUVulkanOptions` at device create). So even with `VK_EXT_mesh_shader` enabled, there is no command buffer to record `vkCmdDrawMeshTasksEXT` on.
+> **Unblock requires one of:** (a) SDL upstream adding raw-handle accessors, or (b) a second, parallel raw-Vulkan RHI backend that creates its own `VkDevice`/`VkCommandBuffer` behind the `rhi::` interface — a large project that effectively re-opens the RHI design. Task 55 correctly leaves VRAM/mesh/bindless caps conservative (Minimum tier) for the same reason. Revisit when (a) or (b) is on the table.
 
 Recommended execution order: **A (46-48) -> CI half of B (49) -> D (51-54) ->
 C (55-58) -> 59**, with packaging (50) near the end once there are real cooked
 assets and a validated render to ship. Wave A makes everything else verifiable;
 the CI half of B keeps it green; D ships player-facing value cheaply (mostly
 tested logic/data) while real hardware is lined up for C + task 48. Task 59 is
-deliberately last in C: it needs the RHI capability work from 55/57 (cube/array
-textures are exactly the kind of capability-gated feature that work establishes
-the pattern for) and is the highest-risk, most GPU-bound item on the list.
+deliberately last: it needs the RHI cube/array-texture support it establishes
+itself and is the highest-risk, most GPU-bound item on the list. (Correction:
+59 depends on 55 only, NOT 57 — 57 is BLOCKED-by-SDL, see the note above the
+task table; SDL3-GPU does expose the cube/array texture types 59 needs.)
 
 #### Phase 4 task detail
 
