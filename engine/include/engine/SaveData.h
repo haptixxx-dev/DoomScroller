@@ -73,28 +73,35 @@ constexpr uint32_t crc32(const uint8_t* data, size_t len) {
     return crc ^ 0xFFFFFFFFu;
 }
 
-// Persistent player progression. This is the blob payload: ten fixed-width
-// fields written in declared order. 40 bytes on disk.
+// Persistent player progression. This is the blob payload: eleven fixed-width
+// fields written in declared order. 44 bytes on disk.
 //
 // LAYOUT IS APPEND-ONLY. The serializer memcpy's the whole struct in declared
 // order, so the first six fields keep their v1 offsets and new fields are only
 // ever appended after bestCombo. Reordering or inserting would silently
 // remap on-disk bytes; bump kSaveVersion instead.
+//
+// NOTE: unlockFlags and econUnlockMask are DISJOINT bitsets in separate fields.
+// unlockFlags holds MetaProgression::Unlock bits (wave-threshold auto-unlocks);
+// econUnlockMask holds WeaponEconomy EconNode unlock bits (purchased weapon
+// slots). Keeping them in separate words avoids the low-bit collision that a
+// single shared field would create (both enums start at bit 0).
 struct SaveData {
     uint32_t bestWave    = 0; // furthest wave reached
     uint32_t highScore   = 0; // best single-run score
     uint32_t totalKills  = 0; // lifetime enemy kills
     uint32_t totalRuns   = 0; // lifetime runs started
-    uint32_t unlockFlags = 0; // bitset of unlocked content (MetaProgression Unlock / WeaponEconomy unlockMask)
+    uint32_t unlockFlags = 0; // MetaProgression::Unlock bitset ONLY (not shared with the economy)
     uint32_t bestCombo   = 0; // best combo multiplier reached
     // --- v2 (appended) --------------------------------------------------------
-    uint32_t currency      = 0; // spendable meta-currency (WeaponEconomy)
-    uint32_t upgradeRanks0 = 0; // EconNode ranks 0..3, one packed uint8 each
-    uint32_t upgradeRanks1 = 0; // EconNode ranks 4..7, one packed uint8 each
-    uint32_t difficulty    = 0; // selected difficulty index (0-based; wave.lua is 1-based)
+    uint32_t currency       = 0; // spendable meta-currency (WeaponEconomy)
+    uint32_t upgradeRanks0  = 0; // EconNode ranks 0..3, one packed uint8 each
+    uint32_t upgradeRanks1  = 0; // EconNode ranks 4..7, one packed uint8 each
+    uint32_t econUnlockMask = 0; // WeaponEconomy EconNode unlock bitset (disjoint from unlockFlags)
+    uint32_t difficulty     = 0; // selected difficulty index (0-based; wave.lua is 1-based)
 };
 
-static_assert(sizeof(SaveData) == 40, "SaveData payload must be 40 bytes on disk");
+static_assert(sizeof(SaveData) == 44, "SaveData payload must be 44 bytes on disk");
 
 namespace detail {
 

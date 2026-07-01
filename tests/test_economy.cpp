@@ -1,3 +1,4 @@
+#include "engine/MetaProgression.h"
 #include "engine/SaveData.h"
 #include "engine/WeaponEconomy.h"
 #include "engine/WeaponUpgrade.h"
@@ -186,4 +187,44 @@ TEST_CASE("economy survives a SaveData serialize/parse round-trip", "[economy]")
     REQUIRE(back.currency == state.currency);
     REQUIRE(back.unlockMask == state.unlockMask);
     REQUIRE(back.ranks == state.ranks);
+}
+
+// Regression: MetaProgression::Unlock bits and WeaponEconomy EconNode unlock
+// bits live in SEPARATE SaveData fields (unlockFlags vs econUnlockMask), so
+// neither subsystem can clobber or forge the other's unlocks. Both enums start
+// at bit 0, so a single shared field would have aliased them.
+TEST_CASE("meta unlocks and economy unlocks are independent (no bit aliasing)", "[economy][meta]") {
+    SaveData save{};
+
+    // Meta side: earn wave-threshold auto-unlocks (sets low bits of unlockFlags).
+    setUnlock(save, Unlock::AltFire);     // bit 0 in unlockFlags
+    setUnlock(save, Unlock::ExtraWeapon); // bit 1 in unlockFlags
+    setUnlock(save, Unlock::HardMode);    // bit 2 in unlockFlags
+
+    // Economy side: build an economy that has NOT purchased any weapon-slot
+    // unlock, then persist it. If the two shared a field, this write would wipe
+    // the meta bits (plain assignment) — here it must leave them untouched.
+    EconomyState econ{};
+    writeEconomy(save, econ);
+    REQUIRE(isUnlocked(save, Unlock::AltFire));
+    REQUIRE(isUnlocked(save, Unlock::ExtraWeapon));
+    REQUIRE(isUnlocked(save, Unlock::HardMode));
+
+    // Now purchase an economy unlock and persist. Meta bits still survive, and
+    // the economy unlock does NOT read back as a phantom meta unlock.
+    econ.currency = 1000u;
+    REQUIRE(purchase(econ, EconNode::UnlockRocket)); // econ bit 0, but in econUnlockMask
+    writeEconomy(save, econ);
+
+    const std::optional<SaveData> parsed = parseSave(serializeSave(save));
+    REQUIRE(parsed.has_value());
+    // Meta unlocks intact after two economy writes + a round-trip.
+    REQUIRE(isUnlocked(*parsed, Unlock::AltFire));
+    REQUIRE(isUnlocked(*parsed, Unlock::HardMode));
+    // Economy unlock present on its own field.
+    REQUIRE(isUnlocked(readEconomy(*parsed), EconNode::UnlockRocket));
+    // And crucially: the economy's purchased UnlockRocket did NOT forge a meta
+    // Unlock at the same bit index, nor vice-versa (they are in disjoint words).
+    REQUIRE_FALSE(isUnlocked(*parsed, Unlock::ArenaTheme));                  // bit 3, never set by either side
+    REQUIRE_FALSE(isUnlocked(readEconomy(*parsed), EconNode::UnlockPlasma)); // econ bit 1 never purchased
 }

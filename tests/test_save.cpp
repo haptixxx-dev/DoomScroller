@@ -38,8 +38,8 @@ TEST_CASE("serializeSave round-trips through parseSave", "[save]") {
     REQUIRE(out->difficulty == in.difficulty);
 }
 
-TEST_CASE("SaveData v2 is 40 bytes and version 2", "[save]") {
-    REQUIRE(sizeof(SaveData) == 40);
+TEST_CASE("SaveData v2 is 44 bytes and version 2", "[save]") {
+    REQUIRE(sizeof(SaveData) == 44);
     REQUIRE(kSaveVersion == 2u);
     REQUIRE(detail::kSavePayloadSize == sizeof(SaveData));
     REQUIRE(serializeSave(SaveData{}).size() == detail::kSaveBlobSize);

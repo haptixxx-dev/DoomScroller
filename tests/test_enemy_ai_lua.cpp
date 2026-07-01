@@ -201,6 +201,23 @@ TEST_CASE("ds.enemy_ai.archetype_for_wave is deterministic and escalates", "[scr
             sawRanged3 = true;
     }
     REQUIRE(sawRanged3);
+
+    // Pin the EXACT per-spawn_index mapping for waves 2-3 to the pre-task-54
+    // formula so the %3->%5 restructure cannot silently shift it: for wave < 4,
+    // sel = (wave + i) % 3; ranged iff (wave>=3 && sel==2), else charger iff
+    // sel==1, else grunt. Any off-by-one in the selector fails here.
+    for (int wave = 2; wave <= 3; ++wave) {
+        for (int i = 0; i < 12; ++i) {
+            const int sel = (wave + i) % 3;
+            int expected  = kGrunt;
+            if (wave >= 3 && sel == 2)
+                expected = kRanged;
+            else if (sel == 1)
+                expected = kCharger;
+            INFO("wave=" << wave << " spawn_index=" << i);
+            REQUIRE(scripts.archetypeForWave(wave, i) == expected);
+        }
+    }
 }
 
 // Task 54: Brute reuses the melee FSM, Spitter reuses the ranged FSM.

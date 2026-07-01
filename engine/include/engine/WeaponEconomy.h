@@ -136,8 +136,9 @@ inline const EconNodeDef& econDef(EconNode node) {
 
 // --- owned state --------------------------------------------------------------
 
-// The player's owned economy: spendable currency, the unlock bitset (shared
-// with SaveData::unlockFlags), and per-node ranks.
+// The player's owned economy: spendable currency, the unlock bitset (persisted
+// to SaveData::econUnlockMask — its own field, NOT SaveData::unlockFlags), and
+// per-node ranks.
 struct EconomyState {
     uint32_t currency   = 0;
     uint32_t unlockMask = 0;
@@ -258,19 +259,22 @@ inline void unpackRankWord(uint32_t word, std::array<uint8_t, static_cast<size_t
 } // namespace detail
 
 // Write the economy into a SaveData: currency -> currency, unlockMask ->
-// unlockFlags (shared bitset), ranks -> the two packed rank words.
+// econUnlockMask (the economy's OWN field), ranks -> the two packed rank words.
+// The economy deliberately does NOT touch SaveData::unlockFlags, which belongs
+// solely to MetaProgression::Unlock — sharing that word would alias the two
+// enums' low bits and let one subsystem's writes clobber or forge the other's.
 inline void writeEconomy(SaveData& save, const EconomyState& state) {
-    save.currency      = state.currency;
-    save.unlockFlags   = state.unlockMask;
-    save.upgradeRanks0 = detail::packRankWord(state, 0);
-    save.upgradeRanks1 = detail::packRankWord(state, 4);
+    save.currency       = state.currency;
+    save.econUnlockMask = state.unlockMask;
+    save.upgradeRanks0  = detail::packRankWord(state, 0);
+    save.upgradeRanks1  = detail::packRankWord(state, 4);
 }
 
 // Read the economy back out of a SaveData (inverse of writeEconomy).
 inline EconomyState readEconomy(const SaveData& save) {
     EconomyState state{};
     state.currency   = save.currency;
-    state.unlockMask = save.unlockFlags;
+    state.unlockMask = save.econUnlockMask;
     detail::unpackRankWord(save.upgradeRanks0, state.ranks, 0);
     detail::unpackRankWord(save.upgradeRanks1, state.ranks, 4);
     return state;
