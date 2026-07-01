@@ -208,8 +208,8 @@ inline std::optional<InputMap> parseInputMap(std::string_view text) {
                 return std::nullopt;
             std::string_view verText = line.substr(kHeaderTag.size());
             uint32_t version         = 0;
-            auto* begin              = verText.data();
-            auto* finish             = verText.data() + verText.size();
+            const auto* begin        = verText.data();
+            const auto* finish       = verText.data() + verText.size();
             auto [ptr, ec]           = std::from_chars(begin, finish, version);
             if (ec != std::errc{} || ptr != finish)
                 return std::nullopt;
@@ -226,10 +226,10 @@ inline std::optional<InputMap> parseInputMap(std::string_view text) {
         std::string_view nameText = line.substr(0, sp);
         std::string_view codeText = line.substr(sp + 1);
 
-        uint32_t code  = 0;
-        auto* begin    = codeText.data();
-        auto* finish   = codeText.data() + codeText.size();
-        auto [ptr, ec] = std::from_chars(begin, finish, code);
+        uint32_t code      = 0;
+        const auto* begin  = codeText.data();
+        const auto* finish = codeText.data() + codeText.size();
+        auto [ptr, ec]     = std::from_chars(begin, finish, code);
         if (ec != std::errc{} || ptr != finish)
             return std::nullopt;
 

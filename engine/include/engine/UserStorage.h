@@ -106,7 +106,12 @@ inline bool writeTextFile(const std::filesystem::path& path, std::string_view te
         }
     }
 
-    std::ofstream out(path, std::ios::trunc);
+    // Open in BINARY mode even though this is "text": on Windows a text-mode
+    // stream translates every '\n' written into "\r\n" on disk, but readTextFile
+    // reads back in binary, so the round-trip would gain a '\r' per line and
+    // *read == text would fail. Writing binary keeps writeTextFile/readTextFile a
+    // faithful byte-for-byte round-trip on every platform.
+    std::ofstream out(path, std::ios::binary | std::ios::trunc);
     if (!out) {
         return false;
     }

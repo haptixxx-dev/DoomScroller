@@ -73,7 +73,7 @@ TEST_CASE("ds.enemy_ai Chase leaves velocity untouched when losing the player", 
 
     EnemyAIDecision d = tickGrunt(scripts, kChase, 20.f, 0.f); // beyond detectionRange(15)
     REQUIRE(d.state == kIdle);
-    REQUIRE_FALSE(d.setVelocity); // original omits the setLinearVelocity call here
+    REQUIRE_FALSE(d.setVelocity);                              // original omits the setLinearVelocity call here
 }
 
 TEST_CASE("ds.enemy_ai Chase to Attack arms the charger windup, not other archetypes", "[scripting][enemy_ai]") {
@@ -129,7 +129,7 @@ TEST_CASE("ds.enemy_ai Charger attack: telegraphs then lunges", "[scripting][ene
 
     EnemyAIDecision outOfRange = tickCharger(scripts, kAttack, 10.f, 0.f); // beyond attackRange(2.5)
     REQUIRE(outOfRange.state == kChase);
-    REQUIRE_FALSE(outOfRange.setVelocity); // leaves velocity untouched, like ranged
+    REQUIRE_FALSE(outOfRange.setVelocity);                                 // leaves velocity untouched, like ranged
 }
 
 TEST_CASE("ds.enemy_ai Ranged attack: retreats close, holds mid, fires on cooldown", "[scripting][enemy_ai]") {

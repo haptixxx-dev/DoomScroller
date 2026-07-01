@@ -238,7 +238,7 @@ class Engine {
     // `face` into m_pointShadowFaces[face]; the caller has already bound that
     // texture as the active pass's color attachment.
     void renderPointShadowFace(rhi::IRHICommandList* cmd, int face, const glm::mat4& faceLightSpace,
-                                const glm::vec3& lightPos);
+                               const glm::vec3& lightPos);
 
     // Offscreen HDR target (task 21). Scene + particles render into this
     // RGBA16Float texture; the tonemap pass then resolves it to the LDR
@@ -367,7 +367,7 @@ class Engine {
         "scripts/enemy_ai.lua", "scripts/wave.lua",    "scripts/boss.lua",
         "scripts/parry.lua",    "scripts/pickups.lua", "scripts/hooks.lua",
     };
-    uint32_t m_playerBodyId                  = 0;
+    uint32_t m_playerBodyId = 0;
     std::unique_ptr<PlayerController> m_player;
 
     // Weapon loadout: a fixed set of weapons (hitscan + projectile types) the
@@ -586,9 +586,9 @@ class Engine {
     int m_windowWidth  = 1280;
     int m_windowHeight = 720;
 
-    uint64_t m_lastTick  = 0;
-    float m_dt           = 0.f;
-    float m_smoothFps    = 0.f; // EMA-smoothed FPS for the HUD counter
+    uint64_t m_lastTick = 0;
+    float m_dt          = 0.f;
+    float m_smoothFps   = 0.f; // EMA-smoothed FPS for the HUD counter
 };
 
 } // namespace ds

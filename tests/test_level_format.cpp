@@ -151,14 +151,14 @@ TEST_CASE("MeshRecordHeader round-trips with a variable-length vertex/index payl
     auto path = std::filesystem::temp_directory_path() / "ds_level_mesh_roundtrip.dslv";
 
     MeshRecordHeader mh{};
-    mh.position[0]  = 1.f;
-    mh.position[1]  = 2.f;
-    mh.position[2]  = 3.f;
-    mh.rotation[0]  = 0.f;
-    mh.rotation[1]  = 0.70710678f;
-    mh.rotation[2]  = 0.f;
-    mh.rotation[3]  = 0.70710678f;
-    mh.materialRef  = 9;
+    mh.position[0] = 1.f;
+    mh.position[1] = 2.f;
+    mh.position[2] = 3.f;
+    mh.rotation[0] = 0.f;
+    mh.rotation[1] = 0.70710678f;
+    mh.rotation[2] = 0.f;
+    mh.rotation[3] = 0.70710678f;
+    mh.materialRef = 9;
 
     std::vector<Vertex> verts(3);
     verts[0].pos    = {0.f, 0.f, 0.f};

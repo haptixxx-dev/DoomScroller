@@ -2,9 +2,10 @@
 
 #include "engine/LevelLoader.h"
 
-#include <charconv>
+#include <cerrno>
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -52,8 +53,8 @@
 // PURITY
 // ------
 // This header is pure: it touches only `LevelData` / its POD records, the C++
-// standard library, and throws nothing (std::from_chars is used for numeric
-// parsing, never exceptions). It links `engine_headers` only — no SDL3/Jolt/EnTT.
+// standard library, and throws nothing (std::strtof is used for float parsing,
+// never exceptions). It links `engine_headers` only — no SDL3/Jolt/EnTT.
 // =============================================================================
 
 namespace ds {
@@ -81,16 +82,35 @@ inline std::vector<std::string_view> tokenize(std::string_view line) {
     return out;
 }
 
-// Parse one token as a float using std::from_chars (no locale, no exceptions).
-// Returns false if the token is not fully consumed as a number, or if it parses
-// to a non-finite value: from_chars accepts "inf"/"nan", but a level coordinate
-// or extent is never legitimately infinite/NaN, so we reject those to honor the
-// documented "non-numeric operand makes the parse fail" contract.
+// Parse one token as a float, no exceptions. Returns false if the token is not
+// fully consumed as a number, or if it parses to a non-finite value ("inf"/"nan"
+// are syntactically accepted but a level coordinate/extent is never legitimately
+// infinite/NaN, so we reject those to honor the documented "non-numeric operand
+// makes the parse fail" contract).
+//
+// NOTE: this deliberately uses std::strtof rather than the floating-point
+// overload of std::from_chars. libc++ (Apple Clang / macOS) does not implement
+// floating-point from_chars — it is declared `= delete`, so a from_chars(float)
+// call fails to compile there ("call to deleted function"). strtof is available
+// everywhere. It is locale-dependent, but the engine/tools run under the default
+// "C" locale (no setlocale call), where '.' is the decimal separator, matching
+// the text level format. We copy into a NUL-terminated buffer because strtof
+// needs a C string and string_view tokens are not guaranteed NUL-terminated.
 inline bool parseFloat(std::string_view tok, float& out) {
-    const char* begin = tok.data();
-    const char* end   = tok.data() + tok.size();
-    auto [ptr, ec]    = std::from_chars(begin, end, out);
-    return ec == std::errc{} && ptr == end && std::isfinite(out);
+    if (tok.empty()) {
+        return false;
+    }
+    std::string buf(tok);
+    char* endPtr    = nullptr;
+    errno           = 0;
+    const float val = std::strtof(buf.c_str(), &endPtr);
+    // Must consume the entire token (endPtr at the terminating NUL), not overflow
+    // (ERANGE), and be finite. strtof returns 0 with endPtr==buf on a non-number.
+    if (endPtr != buf.c_str() + buf.size() || errno == ERANGE || !std::isfinite(val)) {
+        return false;
+    }
+    out = val;
+    return true;
 }
 
 } // namespace detail

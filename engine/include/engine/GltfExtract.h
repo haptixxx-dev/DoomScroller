@@ -2,9 +2,9 @@
 
 #include "engine/Vertex.h"
 
+#include <cstdint>
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
-#include <cstdint>
 #include <string>
 #include <vector>
 

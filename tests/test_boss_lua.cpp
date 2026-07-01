@@ -38,11 +38,11 @@ TEST_CASE("ds.boss phase advances as health crosses descending thresholds", "[sc
     scripts.bossReset();
     REQUIRE(tickPhaseOnly(scripts, 1000, 2000).phase == 1); // 50% phase 1
     scripts.bossReset();
-    REQUIRE(tickPhaseOnly(scripts, 660, 2000).phase == 2); // 33% -> phase 2
+    REQUIRE(tickPhaseOnly(scripts, 660, 2000).phase == 2);  // 33% -> phase 2
     scripts.bossReset();
-    REQUIRE(tickPhaseOnly(scripts, 200, 2000).phase == 2); // 10% phase 2
+    REQUIRE(tickPhaseOnly(scripts, 200, 2000).phase == 2);  // 10% phase 2
     scripts.bossReset();
-    REQUIRE(tickPhaseOnly(scripts, 0, 2000).phase == 3); // dead -> final phase
+    REQUIRE(tickPhaseOnly(scripts, 0, 2000).phase == 3);    // dead -> final phase
 }
 
 TEST_CASE("ds.boss phase clamps negative health to the final phase", "[scripting][boss]") {
@@ -79,8 +79,8 @@ TEST_CASE("ds.boss.reset clears phase/timers/pattern", "[scripting][boss]") {
 
     scripts.bossReset();
     REQUIRE(scripts.doString("phase_after = ds.boss.phase\n"
-                              "attack_after = ds.boss.attack_timer\n"
-                              "pattern_after = ds.boss.pattern"));
+                             "attack_after = ds.boss.attack_timer\n"
+                             "pattern_after = ds.boss.pattern"));
     REQUIRE(scripts.getGlobalNumber("phase_after") == 0.0);
     REQUIRE(scripts.getGlobalNumber("attack_after") == 2.0);
     REQUIRE(scripts.getGlobalNumber("pattern_after") == 0.0);
@@ -92,7 +92,7 @@ TEST_CASE("ds.boss.reset clears phase/timers/pattern", "[scripting][boss]") {
 TEST_CASE("ds.boss.tick fires the expected pellet count and alternates pattern", "[scripting][boss]") {
     ScriptSystem scripts;
     ScriptSystem::Callbacks cb{};
-    int fireCount = 0;
+    int fireCount      = 0;
     cb.spawnProjectile = [&](const glm::vec3&, const glm::vec3&, int, uint32_t) { ++fireCount; };
 
     REQUIRE(scripts.init(cb));
@@ -107,7 +107,7 @@ TEST_CASE("ds.boss.tick fires the expected pellet count and alternates pattern",
     REQUIRE(fireCount == 3);
 
     // Second shot: pattern is now 1 -> charge burst, still phase 0 -> 3 pellets.
-    fireCount               = 0;
+    fireCount                 = 0;
     BossTickResult afterFirst = scripts.bossTick(2000, 2000, 0.f, bossPos, playerPos, 1u);
     // Re-tick past the new cadence to fire again.
     scripts.bossTick(2000, 2000, 3.f, bossPos, playerPos, 1u);

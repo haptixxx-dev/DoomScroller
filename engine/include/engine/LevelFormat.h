@@ -117,12 +117,12 @@ struct LightRecord {
 // Vertex entries and then `indexCount` uint32_t indices (see LevelLoader.cpp
 // for the read/write loop) — see the FILE LAYOUT note above.
 struct MeshRecordHeader {
-    float position[3]    = {0.f, 0.f, 0.f};       // world-space placement
-    float rotation[4]    = {0.f, 0.f, 0.f, 1.f};  // quaternion x,y,z,w; identity default
-    uint32_t vertexCount = 0;                     // number of Vertex entries that follow
-    uint32_t indexCount  = 0;                     // number of uint32_t indices that follow
-    uint32_t materialRef = 0;                     // material table index, 0 = default
-    uint32_t reserved    = 0;                     // reserved for future use, must be 0
+    float position[3]    = {0.f, 0.f, 0.f};      // world-space placement
+    float rotation[4]    = {0.f, 0.f, 0.f, 1.f}; // quaternion x,y,z,w; identity default
+    uint32_t vertexCount = 0;                    // number of Vertex entries that follow
+    uint32_t indexCount  = 0;                    // number of uint32_t indices that follow
+    uint32_t materialRef = 0;                    // material table index, 0 = default
+    uint32_t reserved    = 0;                    // reserved for future use, must be 0
 };
 
 static_assert(sizeof(LevelHeader) == 32, "LevelHeader must be 32 bytes on disk");

@@ -24,8 +24,8 @@ TEST_CASE("pickupCollectCheck collects only inside the sphere", "[scripting][pic
     loadPickupsScript(scripts);
 
     glm::vec3 player{0.f, 1.f, 0.f};
-    REQUIRE(scripts.pickupCollectCheck(player, {0.f, 1.f, 0.f}, 1.5f, 25, 100).collected); // coincident
-    REQUIRE(scripts.pickupCollectCheck(player, {1.f, 1.f, 0.f}, 1.5f, 25, 100).collected); // inside
+    REQUIRE(scripts.pickupCollectCheck(player, {0.f, 1.f, 0.f}, 1.5f, 25, 100).collected);       // coincident
+    REQUIRE(scripts.pickupCollectCheck(player, {1.f, 1.f, 0.f}, 1.5f, 25, 100).collected);       // inside
     REQUIRE_FALSE(scripts.pickupCollectCheck(player, {3.f, 1.f, 0.f}, 1.5f, 25, 100).collected); // outside
 }
 
