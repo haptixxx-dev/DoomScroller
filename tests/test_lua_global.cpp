@@ -22,12 +22,12 @@ TEST_CASE("ds.Global.camera reads and writes live camera state", "[scripting][gl
 
     cb.camera.getPosition = [&] { return camPos; };
     cb.camera.setPosition = [&](const glm::vec3& p) { camPos = p; };
-    cb.camera.getYaw       = [&] { return camYaw; };
-    cb.camera.setYaw       = [&](float y) { camYaw = y; };
-    cb.camera.getPitch     = [&] { return camPitch; };
-    cb.camera.setPitch     = [&](float p) { camPitch = p; };
-    cb.camera.getFovY      = [&] { return camFovY; };
-    cb.camera.setFovY      = [&](float f) { camFovY = f; };
+    cb.camera.getYaw      = [&] { return camYaw; };
+    cb.camera.setYaw      = [&](float y) { camYaw = y; };
+    cb.camera.getPitch    = [&] { return camPitch; };
+    cb.camera.setPitch    = [&](float p) { camPitch = p; };
+    cb.camera.getFovY     = [&] { return camFovY; };
+    cb.camera.setFovY     = [&](float f) { camFovY = f; };
 
     REQUIRE(scripts.init(cb));
 
@@ -57,7 +57,7 @@ TEST_CASE("ds.Global.player exposes health read/write and read-only fields", "[s
     ScriptSystem scripts;
     ScriptSystem::Callbacks cb{};
 
-    int health = 80;
+    int health               = 80;
     cb.player.getHealth      = [&] { return health; };
     cb.player.setHealth      = [&](int v) { health = v; };
     cb.player.getMaxHealth   = [&] { return 100; };

@@ -21,8 +21,8 @@ float* component(glm::vec3& v, const char* key) {
 }
 
 int l_vec3_index(lua_State* L) {
-    glm::vec3* v       = checkUserdata<glm::vec3>(L, 1);
-    const char* key     = luaL_checkstring(L, 2);
+    glm::vec3* v    = checkUserdata<glm::vec3>(L, 1);
+    const char* key = luaL_checkstring(L, 2);
     if (const float* c = component(*v, key)) {
         lua_pushnumber(L, static_cast<lua_Number>(*c));
         return 1;
@@ -31,7 +31,7 @@ int l_vec3_index(lua_State* L) {
 }
 
 int l_vec3_newindex(lua_State* L) {
-    glm::vec3* v   = checkUserdata<glm::vec3>(L, 1);
+    glm::vec3* v    = checkUserdata<glm::vec3>(L, 1);
     const char* key = luaL_checkstring(L, 2);
     float* c        = component(*v, key);
     if (!c)
@@ -60,7 +60,7 @@ int l_vec3_mul(lua_State* L) {
     glm::vec3* v = testUserdata<glm::vec3>(L, 1);
     int numIdx   = 2;
     if (!v) {
-        v     = testUserdata<glm::vec3>(L, 2);
+        v      = testUserdata<glm::vec3>(L, 2);
         numIdx = 1;
     }
     if (!v || !lua_isnumber(L, numIdx))
@@ -86,7 +86,7 @@ int l_vec3_eq(lua_State* L) {
 int l_vec3_tostring(lua_State* L) {
     glm::vec3* v = checkUserdata<glm::vec3>(L, 1);
     lua_pushfstring(L, "Vec3(%f, %f, %f)", static_cast<double>(v->x), static_cast<double>(v->y),
-                     static_cast<double>(v->z));
+                    static_cast<double>(v->z));
     return 1;
 }
 
@@ -118,8 +118,8 @@ int l_vec3_cross(lua_State* L) {
 }
 
 const luaL_Reg kVec3Methods[] = {
-    {"length", l_vec3_length}, {"normalize", l_vec3_normalize}, {"dot", l_vec3_dot},
-    {"cross", l_vec3_cross},   {nullptr, nullptr},
+    {"length", l_vec3_length}, {"normalize", l_vec3_normalize}, {"dot", l_vec3_dot}, {"cross", l_vec3_cross},
+    {nullptr, nullptr},
 };
 
 int l_vec3_new(lua_State* L) {

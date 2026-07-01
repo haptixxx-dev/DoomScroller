@@ -4,9 +4,8 @@
 #include "engine/script/LuaUserdata.h"
 #include "engine/script/LuaVec3.h"
 
-#include <lua.hpp>
-
 #include <cstring>
+#include <lua.hpp>
 
 namespace ds::lua {
 
@@ -15,9 +14,9 @@ namespace {
 // --- ds.Global.camera (read/write) -----------------------------------------
 
 int l_camera_index(lua_State* L) {
-    ScriptSystem* self    = ScriptSystem::fromState(L);
-    const char* key        = luaL_checkstring(L, 2);
-    const auto& cam        = self->callbacks().camera;
+    ScriptSystem* self = ScriptSystem::fromState(L);
+    const char* key    = luaL_checkstring(L, 2);
+    const auto& cam    = self->callbacks().camera;
     if (std::strcmp(key, "position") == 0) {
         if (cam.getPosition)
             pushUserdata<glm::vec3>(L, cam.getPosition());
@@ -42,8 +41,8 @@ int l_camera_index(lua_State* L) {
 
 int l_camera_newindex(lua_State* L) {
     ScriptSystem* self = ScriptSystem::fromState(L);
-    const char* key     = luaL_checkstring(L, 2);
-    const auto& cam     = self->callbacks().camera;
+    const char* key    = luaL_checkstring(L, 2);
+    const auto& cam    = self->callbacks().camera;
     if (std::strcmp(key, "position") == 0) {
         glm::vec3* v = checkUserdata<glm::vec3>(L, 3);
         if (cam.setPosition)
@@ -75,8 +74,8 @@ int l_camera_newindex(lua_State* L) {
 
 int l_player_index(lua_State* L) {
     ScriptSystem* self = ScriptSystem::fromState(L);
-    const char* key     = luaL_checkstring(L, 2);
-    const auto& pl      = self->callbacks().player;
+    const char* key    = luaL_checkstring(L, 2);
+    const auto& pl     = self->callbacks().player;
     if (std::strcmp(key, "health") == 0) {
         lua_pushinteger(L, pl.getHealth ? pl.getHealth() : 0);
         return 1;
@@ -109,8 +108,8 @@ int l_player_index(lua_State* L) {
 
 int l_player_newindex(lua_State* L) {
     ScriptSystem* self = ScriptSystem::fromState(L);
-    const char* key     = luaL_checkstring(L, 2);
-    const auto& pl      = self->callbacks().player;
+    const char* key    = luaL_checkstring(L, 2);
+    const auto& pl     = self->callbacks().player;
     if (std::strcmp(key, "health") == 0) {
         int v = static_cast<int>(luaL_checkinteger(L, 3));
         if (pl.setHealth)
@@ -124,8 +123,8 @@ int l_player_newindex(lua_State* L) {
 
 int l_time_index(lua_State* L) {
     ScriptSystem* self = ScriptSystem::fromState(L);
-    const char* key     = luaL_checkstring(L, 2);
-    const auto& t       = self->callbacks().time;
+    const char* key    = luaL_checkstring(L, 2);
+    const auto& t      = self->callbacks().time;
     if (std::strcmp(key, "dt") == 0) {
         lua_pushnumber(L, t.getDt ? static_cast<lua_Number>(t.getDt()) : 0.0);
         return 1;
@@ -171,7 +170,7 @@ void registerGlobalTable(lua_State* L) {
     lua_getglobal(L, "ds");
     lua_pushvalue(L, -2); // the ds.Global table
     lua_setfield(L, -2, "Global");
-    lua_pop(L, 2); // ds, ds.Global (Global is now stored under ds)
+    lua_pop(L, 2);        // ds, ds.Global (Global is now stored under ds)
 }
 
 } // namespace ds::lua

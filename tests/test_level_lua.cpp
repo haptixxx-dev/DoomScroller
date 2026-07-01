@@ -41,7 +41,7 @@ TEST_CASE("ds.level.add_box accumulates boxes", "[scripting][level]") {
 
     REQUIRE(scripts.init(cb));
     REQUIRE(scripts.doString("ds.level.add_box(Vec3.new(1, 2, 3), Vec3.new(4, 5, 6), Vec3.new(1, 0, 0))\n"
-                              "ds.level.add_box(Vec3.new(0, 0, 0), Vec3.new(1, 1, 1), Vec3.new(0, 1, 0))"));
+                             "ds.level.add_box(Vec3.new(0, 0, 0), Vec3.new(1, 1, 1), Vec3.new(0, 1, 0))"));
 
     REQUIRE(boxes.size() == 2);
     REQUIRE(boxes[0].center == glm::vec3{1.f, 2.f, 3.f});
@@ -61,7 +61,7 @@ TEST_CASE("ds.level.add_mesh captures path/position and converts optional Euler 
 
     REQUIRE(scripts.init(cb));
     REQUIRE(scripts.doString("ds.level.add_mesh('meshes/pillar.gltf', Vec3.new(3, 0, 3))\n"
-                              "ds.level.add_mesh('meshes/ramp.gltf', Vec3.new(1, 1, 1), Vec3.new(0, 90, 0))"));
+                             "ds.level.add_mesh('meshes/ramp.gltf', Vec3.new(1, 1, 1), Vec3.new(0, 90, 0))"));
 
     REQUIRE(meshes.size() == 2);
     REQUIRE(meshes[0].path == "meshes/pillar.gltf");
@@ -86,8 +86,8 @@ TEST_CASE("ds.level.add_spawn captures position, player flag, and archetype hint
 
     REQUIRE(scripts.init(cb));
     REQUIRE(scripts.doString("ds.level.add_spawn(Vec3.new(0, 1.7, 0), true)\n"
-                              "ds.level.add_spawn(Vec3.new(5, 1.5, 5), false)\n"
-                              "ds.level.add_spawn(Vec3.new(-5, 1.5, -5), false, 1)"));
+                             "ds.level.add_spawn(Vec3.new(5, 1.5, 5), false)\n"
+                             "ds.level.add_spawn(Vec3.new(-5, 1.5, -5), false, 1)"));
 
     REQUIRE(spawns.size() == 3);
     REQUIRE(spawns[0].position == glm::vec3{0.f, 1.7f, 0.f});
@@ -96,7 +96,7 @@ TEST_CASE("ds.level.add_spawn captures position, player flag, and archetype hint
     REQUIRE_FALSE(spawns[1].isPlayer);
     REQUIRE(spawns[1].archetypeHint == -1); // no archetype arg -> no hint
     REQUIRE_FALSE(spawns[2].isPlayer);
-    REQUIRE(spawns[2].archetypeHint == 1); // Charger
+    REQUIRE(spawns[2].archetypeHint == 1);  // Charger
 }
 
 TEST_CASE("ds.level.add_light captures position/color/radius/intensity", "[scripting][level]") {
@@ -120,9 +120,9 @@ TEST_CASE("ds.level.* calls are silent no-ops when the callbacks are unset", "[s
     ScriptSystem scripts;
     REQUIRE(scripts.init()); // empty Callbacks{}
     REQUIRE(scripts.doString("ds.level.add_box(Vec3.new(0, 0, 0), Vec3.new(1, 1, 1), Vec3.new(1, 1, 1))\n"
-                              "ds.level.add_spawn(Vec3.new(0, 0, 0), true)\n"
-                              "ds.level.add_light(Vec3.new(0, 0, 0), Vec3.new(1, 1, 1), 1, 1)\n"
-                              "ds.level.add_mesh('x.gltf', Vec3.new(0, 0, 0))"));
+                             "ds.level.add_spawn(Vec3.new(0, 0, 0), true)\n"
+                             "ds.level.add_light(Vec3.new(0, 0, 0), Vec3.new(1, 1, 1), 1, 1)\n"
+                             "ds.level.add_mesh('x.gltf', Vec3.new(0, 0, 0))"));
 }
 
 // Loads the real, shipped assets/scripts/level.lua (DS_ASSETS_DIR is injected
@@ -133,8 +133,8 @@ TEST_CASE("the shipped assets/scripts/level.lua generates the expected counts", 
     ScriptSystem::Callbacks cb{};
     int boxCount = 0, spawnCount = 0, lightCount = 0;
     bool sawPlayerSpawn = false;
-    cb.levelAddBox   = [&](glm::vec3, glm::vec3, glm::vec3) { ++boxCount; };
-    cb.levelAddSpawn = [&](glm::vec3, bool isPlayer, int) {
+    cb.levelAddBox      = [&](glm::vec3, glm::vec3, glm::vec3) { ++boxCount; };
+    cb.levelAddSpawn    = [&](glm::vec3, bool isPlayer, int) {
         ++spawnCount;
         if (isPlayer)
             sawPlayerSpawn = true;

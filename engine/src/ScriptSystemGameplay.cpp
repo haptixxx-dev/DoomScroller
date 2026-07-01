@@ -3,7 +3,6 @@
 // ScriptSystem.cpp so that file doesn't balloon as more systems land; stays
 // free of EnTT/Jolt/Components.h so ds_script_tests keeps linking light.
 #include "engine/ScriptSystem.h"
-
 #include "engine/script/LuaUserdata.h"
 #include "engine/script/LuaVec3.h"
 
@@ -72,7 +71,7 @@ glm::vec3 ScriptSystem::parryReflect(const glm::vec3& incoming, float speedBoost
     lua_pushnumber(m_state, static_cast<lua_Number>(speedBoost));
     callModuleFunction("parry", "reflect_velocity", 2, 1);
     glm::vec3* result = lua::testUserdata<glm::vec3>(m_state, -1);
-    glm::vec3 out      = result ? *result : fallback;
+    glm::vec3 out     = result ? *result : fallback;
     lua_pop(m_state, 1);
     return out;
 }
@@ -92,9 +91,9 @@ float ScriptSystem::parryDashRefund() const {
                 refund = static_cast<float>(lua_tonumber(m_state, -1));
             lua_pop(m_state, 1); // dash_refund
         }
-        lua_pop(m_state, 1); // tuning
+        lua_pop(m_state, 1);     // tuning
     }
-    lua_pop(m_state, 2); // parry, ds
+    lua_pop(m_state, 2);         // parry, ds
     return refund;
 }
 
@@ -111,7 +110,7 @@ PickupDrop ScriptSystem::pickupRegisterKill() {
 }
 
 PickupCollect ScriptSystem::pickupCollectCheck(const glm::vec3& playerPos, const glm::vec3& pickupPos, float radius,
-                                                int value, int headroom) const {
+                                               int value, int headroom) const {
     PickupCollect out{};
     if (!m_state)
         return out;
@@ -142,7 +141,7 @@ WaveState ScriptSystem::readWaveState() const {
     if (lua_istable(m_state, -1)) {
         lua_getfield(m_state, -1, "state");
         if (lua_istable(m_state, -1)) {
-            int idx              = lua_gettop(m_state);
+            int idx               = lua_gettop(m_state);
             out.wave              = tableIntField(m_state, idx, "wave", out.wave);
             out.aliveEnemies      = tableIntField(m_state, idx, "alive_enemies", out.aliveEnemies);
             out.intermission      = tableFloatField(m_state, idx, "intermission", out.intermission);
@@ -158,7 +157,7 @@ WaveState ScriptSystem::readWaveState() const {
         }
         lua_pop(m_state, 1); // state
     }
-    lua_pop(m_state, 2); // wave, ds
+    lua_pop(m_state, 2);     // wave, ds
     return out;
 }
 
@@ -223,9 +222,9 @@ void ScriptSystem::bossReset() {
     callModuleFunction("boss", "reset", 0, 0);
 }
 
-EnemyAIDecision ScriptSystem::enemyAITick(int archetype, int state, float dist, float attackCooldown,
-                                           float moveSpeed, float attackRange, float detectionRange,
-                                           float attackInterval, float chargeWindup, float chargeSpeed) {
+EnemyAIDecision ScriptSystem::enemyAITick(int archetype, int state, float dist, float attackCooldown, float moveSpeed,
+                                          float attackRange, float detectionRange, float attackInterval,
+                                          float chargeWindup, float chargeSpeed) {
     EnemyAIDecision out{};
     if (!m_state)
         return out;
@@ -263,7 +262,7 @@ int ScriptSystem::archetypeForWave(int wave, int spawnIndex) const {
 }
 
 BossTickResult ScriptSystem::bossTick(int health, int maxHealth, float dt, const glm::vec3& bossPos,
-                                       const glm::vec3& playerPos, uint32_t bossBodyId) {
+                                      const glm::vec3& playerPos, uint32_t bossBodyId) {
     BossTickResult out{};
     if (!m_state)
         return out;

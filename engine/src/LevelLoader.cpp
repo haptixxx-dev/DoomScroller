@@ -196,9 +196,8 @@ bool LevelLoader::write(const std::filesystem::path& path, const LevelData& data
     return ok;
 }
 
-void LevelLoader::populate(const LevelData& data, entt::registry& world, PhysicsWorld& physics,
-                           rhi::IRHIDevice& device, rhi::RHITexture albedo, rhi::RHISampler sampler,
-                           glm::vec3* playerStart) {
+void LevelLoader::populate(const LevelData& data, entt::registry& world, PhysicsWorld& physics, rhi::IRHIDevice& device,
+                           rhi::RHITexture albedo, rhi::RHISampler sampler, glm::vec3* playerStart) {
     for (const auto& box : data.boxes) {
         glm::vec3 center{box.center[0], box.center[1], box.center[2]};
         glm::vec3 half{box.halfExtents[0], box.halfExtents[1], box.halfExtents[2]};

@@ -40,8 +40,8 @@ TEST_CASE("waveEnemiesForWave honours custom tuning", "[scripting][waves]") {
     ScriptSystem scripts;
     loadWaveScript(scripts);
     REQUIRE(scripts.doString("ds.wave.config.base_enemies = 5\n"
-                              "ds.wave.config.enemies_per_wave = 3\n"
-                              "ds.wave.config.max_enemies_per_wave = 10"));
+                             "ds.wave.config.enemies_per_wave = 3\n"
+                             "ds.wave.config.max_enemies_per_wave = 10"));
 
     REQUIRE(scripts.waveEnemiesForWave(1) == 5);
     REQUIRE(scripts.waveEnemiesForWave(2) == 8);
@@ -63,7 +63,7 @@ TEST_CASE("registerKill chains combos inside the window", "[scripting][waves][sc
     REQUIRE(s.aliveEnemies == 2);
     REQUIRE(s.comboTimer == Catch::Approx(3.f)); // default combo_window
 
-    scripts.waveRegisterKill(); // chained: combo 2, +200
+    scripts.waveRegisterKill();                  // chained: combo 2, +200
     s = scripts.readWaveState();
     REQUIRE(s.kills == 2);
     REQUIRE(s.combo == 2);
@@ -148,10 +148,10 @@ TEST_CASE("waveReset restores a fresh run", "[scripting][waves]") {
     ScriptSystem scripts;
     loadWaveScript(scripts);
     REQUIRE(scripts.doString("ds.wave.state.wave = 5\n"
-                              "ds.wave.state.kills = 20\n"
-                              "ds.wave.state.score = 4200\n"
-                              "ds.wave.state.combo = 7\n"
-                              "ds.wave.state.time_survived = 99"));
+                             "ds.wave.state.kills = 20\n"
+                             "ds.wave.state.score = 4200\n"
+                             "ds.wave.state.combo = 7\n"
+                             "ds.wave.state.time_survived = 99"));
 
     scripts.waveReset();
     WaveState s = scripts.readWaveState();

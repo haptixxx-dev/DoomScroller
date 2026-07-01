@@ -78,16 +78,16 @@ struct AudioSystem::Impl {
 
         auto ptr    = std::make_unique<ma_sound>();
         ma_result r = ma_sound_init_from_file(&engine, full.string().c_str(),
-                                              MA_SOUND_FLAG_DECODE | MA_SOUND_FLAG_NO_SPATIALIZATION,
-                                              nullptr, nullptr, ptr.get());
+                                              MA_SOUND_FLAG_DECODE | MA_SOUND_FLAG_NO_SPATIALIZATION, nullptr, nullptr,
+                                              ptr.get());
         if (r != MA_SUCCESS) {
             SDL_LogWarn(SDL_LOG_CATEGORY_AUDIO, "AudioSystem: failed to load sound (%d): %s", (int)r,
                         full.string().c_str());
             missing.insert(path);
             return nullptr;
         }
-        auto raw         = ptr.get();
-        sources[path]    = std::move(ptr);
+        auto* raw     = ptr.get();
+        sources[path] = std::move(ptr);
         return raw;
     }
 

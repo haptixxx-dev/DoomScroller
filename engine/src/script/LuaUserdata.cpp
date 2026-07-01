@@ -36,11 +36,11 @@ void registerType(lua_State* L, const TypeSpec& spec) {
 }
 
 int methodFallback(lua_State* L, const char* typeName) {
-    luaL_getmetatable(L, typeName); // [..., metatable]
+    luaL_getmetatable(L, typeName);   // [..., metatable]
     lua_getfield(L, -1, "__methods"); // [..., metatable, methods]
-    lua_pushvalue(L, 2); // key
-    lua_gettable(L, -2); // [..., metatable, methods, methods[key]]
-    return 1; // Lua discards everything below the top result for us.
+    lua_pushvalue(L, 2);              // key
+    lua_gettable(L, -2);              // [..., metatable, methods, methods[key]]
+    return 1;                         // Lua discards everything below the top result for us.
 }
 
 } // namespace ds::lua

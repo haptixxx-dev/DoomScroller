@@ -48,10 +48,10 @@ rhi::RHIShader ShaderLoader::load(rhi::IRHIDevice& device, const std::string& na
         buf[size] = '\0';
 
     rhi::ShaderDesc desc{};
-    desc.stage             = stage;
-    desc.format            = m_format;
-    desc.bytecode          = buf.data();
-    desc.bytecodeSize      = static_cast<size_t>(isMSL ? size + 1 : size);
+    desc.stage        = stage;
+    desc.format       = m_format;
+    desc.bytecode     = buf.data();
+    desc.bytecodeSize = static_cast<size_t>(isMSL ? size + 1 : size);
     // Slang emits "main" as the SPIRV entry point name by default; MSL/DXIL use the real name.
     if (m_format == rhi::ShaderFormat::SPIRV) {
         desc.entryPoint = "main";

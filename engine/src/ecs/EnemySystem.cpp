@@ -30,16 +30,15 @@ void enemySystem(entt::registry& world, PhysicsWorld& physics, ScriptSystem& scr
 
         EnemyAIDecision decision =
             scripts.enemyAITick(static_cast<int>(enemy.archetype), static_cast<int>(enemy.state), dist,
-                                 enemy.attackCooldown, enemy.moveSpeed, enemy.attackRange, enemy.detectionRange,
-                                 enemy.attackInterval, enemy.chargeWindup, enemy.chargeSpeed);
+                                enemy.attackCooldown, enemy.moveSpeed, enemy.attackRange, enemy.detectionRange,
+                                enemy.attackInterval, enemy.chargeWindup, enemy.chargeSpeed);
 
         enemy.state = static_cast<EnemyComponent::State>(decision.state);
 
         if (decision.setVelocity) {
             float speed = decision.lunge ? enemy.chargeSpeed : enemy.moveSpeed;
-            physics.setLinearVelocity(
-                enemy.physicsBodyId,
-                {dir.x * speed * decision.moveIntent, vy, dir.z * speed * decision.moveIntent});
+            physics.setLinearVelocity(enemy.physicsBodyId,
+                                      {dir.x * speed * decision.moveIntent, vy, dir.z * speed * decision.moveIntent});
         }
 
         if (decision.armWindup)

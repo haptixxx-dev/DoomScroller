@@ -137,8 +137,7 @@ TEST_CASE("cubeFaceUp is never parallel to that face's direction", "[shadow][poi
     }
 }
 
-TEST_CASE("pointShadowFaceMatrix: a point straight ahead on each face projects near clip center",
-          "[shadow][point]") {
+TEST_CASE("pointShadowFaceMatrix: a point straight ahead on each face projects near clip center", "[shadow][point]") {
     glm::vec3 lightPos{2.f, 3.f, -1.f};
     constexpr float kNear = 0.1f;
     constexpr float kFar  = 20.f;

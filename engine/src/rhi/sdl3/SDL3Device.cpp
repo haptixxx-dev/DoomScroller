@@ -258,26 +258,41 @@ void SDL3Device::destroyShader(RHIShader shader) {
 // ---------------------------------------------------------------------------
 static SDL_GPUBlendFactor toSDLBlendFactor(BlendFactor f) {
     switch (f) {
-    case BlendFactor::Zero:             return SDL_GPU_BLENDFACTOR_ZERO;
-    case BlendFactor::One:              return SDL_GPU_BLENDFACTOR_ONE;
-    case BlendFactor::SrcColor:         return SDL_GPU_BLENDFACTOR_SRC_COLOR;
-    case BlendFactor::OneMinusSrcColor: return SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_COLOR;
-    case BlendFactor::SrcAlpha:         return SDL_GPU_BLENDFACTOR_SRC_ALPHA;
-    case BlendFactor::OneMinusSrcAlpha: return SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
-    case BlendFactor::DstAlpha:         return SDL_GPU_BLENDFACTOR_DST_ALPHA;
-    case BlendFactor::OneMinusDstAlpha: return SDL_GPU_BLENDFACTOR_ONE_MINUS_DST_ALPHA;
-    default:                            return SDL_GPU_BLENDFACTOR_ONE;
+    case BlendFactor::Zero:
+        return SDL_GPU_BLENDFACTOR_ZERO;
+    case BlendFactor::One:
+        return SDL_GPU_BLENDFACTOR_ONE;
+    case BlendFactor::SrcColor:
+        return SDL_GPU_BLENDFACTOR_SRC_COLOR;
+    case BlendFactor::OneMinusSrcColor:
+        return SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_COLOR;
+    case BlendFactor::SrcAlpha:
+        return SDL_GPU_BLENDFACTOR_SRC_ALPHA;
+    case BlendFactor::OneMinusSrcAlpha:
+        return SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+    case BlendFactor::DstAlpha:
+        return SDL_GPU_BLENDFACTOR_DST_ALPHA;
+    case BlendFactor::OneMinusDstAlpha:
+        return SDL_GPU_BLENDFACTOR_ONE_MINUS_DST_ALPHA;
+    default:
+        return SDL_GPU_BLENDFACTOR_ONE;
     }
 }
 
 static SDL_GPUBlendOp toSDLBlendOp(BlendOp op) {
     switch (op) {
-    case BlendOp::Add:             return SDL_GPU_BLENDOP_ADD;
-    case BlendOp::Subtract:        return SDL_GPU_BLENDOP_SUBTRACT;
-    case BlendOp::ReverseSubtract: return SDL_GPU_BLENDOP_REVERSE_SUBTRACT;
-    case BlendOp::Min:             return SDL_GPU_BLENDOP_MIN;
-    case BlendOp::Max:             return SDL_GPU_BLENDOP_MAX;
-    default:                       return SDL_GPU_BLENDOP_ADD;
+    case BlendOp::Add:
+        return SDL_GPU_BLENDOP_ADD;
+    case BlendOp::Subtract:
+        return SDL_GPU_BLENDOP_SUBTRACT;
+    case BlendOp::ReverseSubtract:
+        return SDL_GPU_BLENDOP_REVERSE_SUBTRACT;
+    case BlendOp::Min:
+        return SDL_GPU_BLENDOP_MIN;
+    case BlendOp::Max:
+        return SDL_GPU_BLENDOP_MAX;
+    default:
+        return SDL_GPU_BLENDOP_ADD;
     }
 }
 
