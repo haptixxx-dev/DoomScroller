@@ -59,6 +59,24 @@ class IRHIDevice {
     virtual const RHICaps& caps() const           = 0;
     virtual TextureFormat swapchainFormat() const = 0;
 
+    // Debug/tooling: download a color render-target texture to a binary P6 PPM
+    // file (golden-render capture, Phase 4 task 48). `fmt` is the SOURCE
+    // texture's own format (the RHITexture handle is opaque and doesn't carry
+    // it), so an offscreen BGRA8/RGBA8/RGBA16Float target reads back correctly
+    // rather than being mis-sized/mis-swizzled as the swapchain format. The
+    // byte layout is identical to ds::writePpm (GoldenImage.h). Default is a
+    // no-op so headless / non-capturing backends still satisfy the interface;
+    // the SDL3 backend overrides it. Kept on the rhi:: interface so the engine
+    // never reaches for the concrete SDL3Device (CLAUDE.md: engine talks only
+    // to rhi::).
+    virtual void debugDownloadTexture(RHITexture tex, uint32_t w, uint32_t h, TextureFormat fmt, const char* path) {
+        (void)tex;
+        (void)w;
+        (void)h;
+        (void)fmt;
+        (void)path;
+    }
+
     // -----------------------------------------------------------------------
     // Native handle escape hatch for extended features (mesh shaders, etc.)
     // Returns nullptr if backend doesn't expose native handles.

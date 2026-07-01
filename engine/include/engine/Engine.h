@@ -2,6 +2,7 @@
 
 #include "engine/AudioSystem.h"
 #include "engine/Camera.h"
+#include "engine/CaptureConfig.h"
 #include "engine/CombatFeedback.h"
 #include "engine/GameFeel.h"
 #include "engine/ParticleSystem.h"
@@ -52,6 +53,30 @@ class Engine {
     Engine& operator=(const Engine&) = delete;
 
     void run();
+
+    // --- Offscreen golden-render capture (Phase 4 task 48). ----------------
+    // Renders ONE deterministic frame of the current scene into the existing
+    // render graph, redirecting the tonemap pass to an LDR capture target
+    // (instead of the swapchain), then dumps that target to a binary P6 PPM at
+    // `outPpmPath` via rhi::IRHIDevice::debugDownloadTexture. Returns false if
+    // the device/target could not produce a frame. Intended to be driven from
+    // a headless-of-input CLI path (game --capture) so a GPU bench can produce
+    // the golden reference images the task-47 harness (GoldenImage.h) diffs.
+    //
+    // Determinism: the captured frame is whatever the world currently holds
+    // WITHOUT ticking update() — so calling this straight after construction
+    // captures the Menu/arena backdrop at t=0 with no RNG advanced, no particle
+    // ageing, and no time-based animation. The caller must NOT run() first.
+    //
+    // RENDERS UNVERIFIED IN SANDBOX: the capture path compiles here but cannot
+    // be executed without a GPU. The bench must run --capture, eyeball the
+    // output, and commit the PPMs (see docs/phase4-bench-plan.md task 48).
+    bool captureFrame(const char* outPpmPath);
+
+    // Convenience: capture the given scene to captureOutputPath(dir, scene,
+    // <backend from the live device>). Returns the written path on success (so
+    // the caller/log knows exactly which file to eyeball), empty on failure.
+    std::string captureScene(CaptureScene scene, std::string_view dir);
 
     rhi::IRHIDevice& device() { return *m_device; }
     entt::registry& world() { return m_world; }
@@ -248,6 +273,21 @@ class Engine {
     rhi::RHIShader m_tonemapVS         = {};
     rhi::RHIShader m_tonemapFS         = {};
     rhi::RHIPipeline m_tonemapPipeline = {};
+
+    // --- Offscreen capture target (Phase 4 task 48). -----------------------
+    // When valid AND m_capturing, render()'s tonemap pass writes the final LDR
+    // frame here (matching the swapchain's format/size so the same
+    // m_tonemapPipeline stays valid) INSTEAD of the swapchain — this is the
+    // texture captureFrame() then downloads to PPM. The frame is still
+    // submitted+presented as usual (the swapchain just goes unwritten this
+    // frame, which is invisible in a headless capture). Null in normal play
+    // (the tonemap pass targets the swapchain as before), so shipping/gameplay
+    // behaviour is unchanged. Lazily created (swapchain format, window-sized)
+    // by captureFrame() and freed in ~Engine.
+    rhi::RHITexture m_captureTarget = {};
+    // Set for the single frame captureFrame() drives; render() reads it to
+    // redirect the tonemap pass to m_captureTarget.
+    bool m_capturing = false;
 
     // Bloom post-process (task 26). After Pass A (scene -> HDR), a bright-pass
     // extracts over-threshold light into m_bloomA, then a separable Gaussian

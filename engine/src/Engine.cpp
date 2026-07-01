@@ -335,6 +335,8 @@ Engine::~Engine() {
         m_device->destroyTexture(m_depthTexture);
     if (m_hdrTexture.valid())
         m_device->destroyTexture(m_hdrTexture);
+    if (m_captureTarget.valid())
+        m_device->destroyTexture(m_captureTarget);
     m_textures.reset();
     m_device.reset();
     if (m_window)
@@ -2798,6 +2800,12 @@ void Engine::render() {
     {
         rhi::ColorAttachment color{};
         // Invalid texture handle => the backend binds the swapchain image.
+        // When capturing (task 48) redirect the final LDR frame to the
+        // offscreen capture target instead — same format/size as the swapchain
+        // so m_tonemapPipeline stays valid — so captureFrame() can download it
+        // to PPM. Normal play leaves this invalid (writes the swapchain).
+        if (m_capturing && m_captureTarget.valid())
+            color.texture = m_captureTarget;
         color.loadOp  = rhi::LoadOp::Clear;
         color.storeOp = rhi::StoreOp::Store;
 
@@ -2832,6 +2840,72 @@ void Engine::render() {
     m_renderGraph.execute(*cmd);
 
     m_device->submitFrame(cmd);
+}
+
+// -----------------------------------------------------------------------------
+// Offscreen golden-render capture (Phase 4 task 48).
+//
+// RENDERS UNVERIFIED IN SANDBOX: this compiles + is exercised only on the GPU
+// bench. The pure filename/scene scheme it uses (engine/CaptureConfig.h) is
+// unit-tested (tests/test_capture_config.cpp); everything below touches
+// m_device/render and is compile-only-verified here. The bench must run
+// --capture, eyeball the PPMs, and commit them (docs/phase4-bench-plan.md 48).
+// -----------------------------------------------------------------------------
+bool Engine::captureFrame(const char* outPpmPath) {
+    if (outPpmPath == nullptr || m_windowWidth <= 0 || m_windowHeight <= 0)
+        return false;
+
+    const uint32_t w = static_cast<uint32_t>(m_windowWidth);
+    const uint32_t h = static_cast<uint32_t>(m_windowHeight);
+
+    // Capture the POST-TONEMAP LDR frame (deterministic, 8-bit) rather than the
+    // raw RGBA16Float HDR target: the LDR bytes are what golden diffs want, and
+    // avoid F16 rounding differing per driver (see the bench-plan's risk note).
+    // The capture target MUST match the swapchain format the tonemap pipeline
+    // was built against (SDL3 requires the pass attachment format to match the
+    // pipeline's color target), so we take swapchainFormat() verbatim.
+    const rhi::TextureFormat captureFmt = m_device->swapchainFormat();
+    if (!m_captureTarget.valid()) {
+        rhi::TextureDesc capDesc{};
+        capDesc.width          = w;
+        capDesc.height         = h;
+        capDesc.format         = captureFmt;
+        capDesc.isRenderTarget = true;
+        capDesc.debugName      = "capture";
+        m_captureTarget        = m_device->createTexture(capDesc);
+    }
+    if (!m_captureTarget.valid())
+        return false;
+
+    // Render exactly one frame with the tonemap pass redirected to the capture
+    // target (the swapchain goes unwritten this frame; it is still presented,
+    // which is invisible in a headless capture). No update() is ticked, so the
+    // scene state is pinned — deterministic (t=0, no RNG/animation advanced).
+    m_capturing = true;
+    render();
+    m_capturing = false;
+
+    // Download the LDR capture target to a P6 PPM. debugDownloadTexture handles
+    // the BGRA/RGBA swizzle from the SOURCE format. Its own fenced copy waits
+    // for the GPU, so the just-submitted render is complete before readback.
+    m_device->debugDownloadTexture(m_captureTarget, w, h, captureFmt, outPpmPath);
+    return true;
+}
+
+std::string Engine::captureScene(CaptureScene scene, std::string_view dir) {
+    // Tag the golden with the running backend so per-backend byte differences
+    // (BGRA vs RGBA, F16 rounding) never collide. Reaching nativeDevice() for
+    // the SDL driver name is the sanctioned escape hatch (CLAUDE.md); a missing
+    // handle just yields the Unknown tag.
+    CaptureBackend backend = CaptureBackend::Unknown;
+    if (auto* gpu = static_cast<SDL_GPUDevice*>(m_device->nativeDevice())) {
+        if (const char* driver = SDL_GetGPUDeviceDriver(gpu))
+            backend = captureBackendFromDriver(driver);
+    }
+    const std::string path = captureOutputPath(dir, scene, backend);
+    if (!captureFrame(path.c_str()))
+        return {};
+    return path;
 }
 
 void Engine::renderStateOverlay(rhi::IRHICommandList* cmd) {
