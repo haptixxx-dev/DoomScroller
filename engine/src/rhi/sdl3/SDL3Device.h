@@ -101,7 +101,7 @@ class SDL3Device final : public IRHIDevice {
     // it), so an offscreen RGBA16Float / R32Float target reads back correctly
     // rather than being mis-sized/mis-swizzled as swapchain BGRA8. Conversion
     // to RGB8 is the pure ds::rhi::convertToRgb8 (TextureReadback.h).
-    void debugDownloadTexture(RHITexture tex, uint32_t w, uint32_t h, TextureFormat fmt, const char* path);
+    void debugDownloadTexture(RHITexture tex, uint32_t w, uint32_t h, TextureFormat fmt, const char* path) override;
 
   private:
     SDL_GPUTextureFormat toSDLFormat(TextureFormat fmt) const;
