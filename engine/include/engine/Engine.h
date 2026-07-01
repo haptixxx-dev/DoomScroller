@@ -71,7 +71,7 @@ class Engine {
     // RENDERS UNVERIFIED IN SANDBOX: the capture path compiles here but cannot
     // be executed without a GPU. The bench must run --capture, eyeball the
     // output, and commit the PPMs (see docs/phase4-bench-plan.md task 48).
-    bool captureFrame(const char* outPpmPath);
+    bool captureFrame(CaptureScene scene, const char* outPpmPath);
 
     // Convenience: capture the given scene to captureOutputPath(dir, scene,
     // <backend from the live device>). Returns the written path on success (so
@@ -85,6 +85,11 @@ class Engine {
     void processEvents();
     void update();
     void render();
+    // Deterministically stage a capture scene's state (no wall-clock/RNG/input)
+    // before captureFrame() renders it. Startup = as-constructed backdrop;
+    // Arena = start a run + a fixed emissive burst ticked at fixed dt so
+    // HDR/bloom/point-light/particles are exercised.
+    void setupCaptureScene(CaptureScene scene);
     void initScene();
     // Registered as an entt on_destroy<MeshComponent> observer so that whenever a
     // mesh-carrying entity is destroyed (projectiles, gibs, enemies, level
