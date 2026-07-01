@@ -96,8 +96,12 @@ class SDL3Device final : public IRHIDevice {
 
     void setVSync(bool enabled) override;
 
-    // Debug: download an RGBA8/BGRA8 render-target texture to a PPM file.
-    void debugDownloadTexture(RHITexture tex, uint32_t w, uint32_t h, const char* path);
+    // Debug: download a render-target texture to a binary P6 PPM file. `fmt`
+    // is the SOURCE texture's format (the handle is opaque and doesn't carry
+    // it), so an offscreen RGBA16Float / R32Float target reads back correctly
+    // rather than being mis-sized/mis-swizzled as swapchain BGRA8. Conversion
+    // to RGB8 is the pure ds::rhi::convertToRgb8 (TextureReadback.h).
+    void debugDownloadTexture(RHITexture tex, uint32_t w, uint32_t h, TextureFormat fmt, const char* path);
 
   private:
     SDL_GPUTextureFormat toSDLFormat(TextureFormat fmt) const;
