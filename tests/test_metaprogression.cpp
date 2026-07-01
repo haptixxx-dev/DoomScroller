@@ -162,12 +162,21 @@ TEST_CASE("full run loop round-trips through serialize/parse", "[meta]") {
 namespace {
 
 // Verbatim transcription of the inline fold in Engine::persistSave
-// (Engine.cpp:1264-1267): bestWave / highScore / bestCombo are running maxima,
-// totalKills accumulates this run's kills. NOTE: the inline highScore uses the
-// engine's already-reconciled m_highScore (recordHighScore ran first), which for
-// a single run equals max(prevHighScore, thisRunScore) — the same value
-// applyRunResult computes from RunResult.score. This oracle models that with the
-// run's own score, matching the fold's observable result.
+// (Engine.cpp:1264-1267): bestWave / bestCombo are running maxima and totalKills
+// accumulates this run's kills — those three match applyRunResult field-for-field
+// unconditionally.
+//
+// highScore CAVEAT (adversarial-review finding): this oracle models highScore as
+// max(prev.highScore, score), which equals applyRunResult. The real inline fold
+// assigns m_save.highScore from the engine's reconciled m_highScore, and there is
+// a reachable state where that REGRESSES below the stored save value: if the
+// legacy highscore.dat (diskHigh) is lower than the save blob's highScore, a
+// mid-range run takes recordHighScore's success branch and sets m_highScore to
+// the run score (not a max vs the saved value). So the applyRunResult equivalence
+// proven here holds only under the invariant diskHigh >= saveHigh. The clean fix
+// is Engine-side (fold with max against m_save.highScore so it can never regress,
+// which is exactly what applyRunResult does) — a runtime change deferred to the
+// bench call-site swap. Tracked in docs/phase4-bench-plan.md.
 SaveData inlinePersistSaveFold(SaveData s, int wave, int score, int kills, int bestCombo) {
     s.bestWave  = std::max(s.bestWave, static_cast<uint32_t>(std::max(wave, 0)));
     s.highScore = std::max(s.highScore, static_cast<uint32_t>(std::max(score, 0)));
