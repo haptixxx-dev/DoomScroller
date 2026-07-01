@@ -10,11 +10,19 @@
 //   * read-write storage buffer slot 0 : Instance pool (billboard output)
 //   * uniform                   slot 0 : SimParams (dt, gravity, count)
 //
-// The shader integrates in place is NOT possible (read-only state buffer), so
-// state advancement is owned by the CPU pool; this pass derives the per-frame
-// instance positions by extrapolating each live particle by dt. Keeping state
-// CPU-side avoids a second RW buffer + ping-pong while still moving the
+// State advancement is owned by the CPU pool (ParticleSystem::update already
+// integrated the pool to this frame before the snapshot upload); this pass is a
+// pure pass-through PACK — it copies each live particle's already-current
+// position/size/color into the instance buffer WITHOUT advancing it. This makes
+// the GPU compute output identical to the CPU fallback path
+// (ParticleSystem::buildInstances), which also packs p.position unchanged. An
+// earlier version extrapolated one extra dt step here (pos += vel*dt), which
+// made the GPU-drawn positions lead the CPU pool by one frame (task 58). Keeping
+// state CPU-side avoids a second RW buffer + ping-pong while still moving the
 // instance-buffer fill (the hot per-frame upload) onto the GPU.
+//
+// NOTE: dt/gravity are retained in SimParams for ABI stability (the host still
+// uploads them) but are unused now that the pass no longer integrates.
 
 struct GpuParticle {
     float3 position;
@@ -63,11 +71,10 @@ void compMain(uint3 tid : SV_DispatchThreadID) {
         inst.size     = 0.0;
         inst.color    = float4(0.0, 0.0, 0.0, 0.0);
     } else {
-        // Extrapolate one step of motion (pos += vel*dt; vel.y -= g*dt) so the
-        // GPU owns the per-frame instance fill.
-        float3 vel  = p.velocity + float3(0.0, -gParams.gravity * gParams.dt, 0.0);
-        float3 pos  = p.position + vel * gParams.dt;
-        inst.position = pos;
+        // Pass-through pack: emit the particle's already-integrated state
+        // unchanged so the compute path matches the CPU buildInstances() output
+        // exactly (no extra dt extrapolation — see the header note, task 58).
+        inst.position = p.position;
         inst.size     = p.size;
         inst.color    = p.color;
     }

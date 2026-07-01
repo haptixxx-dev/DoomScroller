@@ -443,6 +443,14 @@ The **pure cores already landed and are tested**:
   inline maxima for `m_save = applyRunResult(m_save, RunResult{wave,score,kills,
   bestCombo})` — identical fold, plus the auto-unlock rules. Then
   `writeEconomy(m_save, m_economy)` after crediting `currencyForRun(...)`.
+  - **LATENT BUG the swap FIXES (adversarial-review finding):** the current
+    inline fold assigns `m_save.highScore` from the reconciled `m_highScore`,
+    which can REGRESS below the stored `m_save.highScore` when the legacy
+    `highscore.dat` is lower than the save blob (diskHigh < saveHigh) and a
+    mid-range run takes `recordHighScore`'s success branch. `applyRunResult`
+    folds with `max`, so it never regresses — swapping to it is a strict
+    correctness improvement, not just a refactor. `test_metaprogression.cpp`
+    documents that its equivalence proof holds under `diskHigh >= saveHigh`.
 - **`startGame` (`Engine.cpp:1179–1247`)** currently does `++m_save.totalRuns;`
   inline (`:1206`). Replace with `m_save = startRun(m_save);` (identical, but the
   tested path).
